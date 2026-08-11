@@ -1,0 +1,21 @@
+*.py[cod]
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Isaac Lab / RSL-RL outputs
+logs/
+videos/
+wandb/
+
+# Local deployment bundles (not tracked)
+artifacts/
+.meta-agent/
+
+# Trained models and gradmotion task config (tracked)
+!trained_models/
+!.gm/
