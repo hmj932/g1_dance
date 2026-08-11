@@ -160,7 +160,8 @@ def load_policy(checkpoint_path: str, device: str = "cpu"):
         obs_dim: int
     """
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    model_dict = ckpt["model_dict"]
+    # Support both key conventions: BeyondMimic saves as "model_state_dict"
+    model_dict = ckpt.get("model_dict") or ckpt.get("model_state_dict") or ckpt
 
     # Extract actor weights — keys like "actor.0.weight", "actor.0.bias", etc.
     actor_layers = OrderedDict()
@@ -208,19 +209,20 @@ def load_policy(checkpoint_path: str, device: str = "cpu"):
     print(f"[policy] {len(layers)} linear layers")
 
     # Load empirical normalization
+    # Supports "obs_normalizer" (old) and "obs_norm_state_dict" (BeyondMimic RSL-RL)
     normalizer = None
-    if "obs_normalizer" in ckpt and ckpt["obs_normalizer"] is not None:
-        norm_state = ckpt["obs_normalizer"]
-        if isinstance(norm_state, dict):
-            mean = torch.tensor(norm_state.get("mean", np.zeros(obs_dim)), dtype=torch.float32)
-            var = torch.tensor(norm_state.get("var", np.ones(obs_dim)), dtype=torch.float32)
-            count = norm_state.get("count", 0)
-            eps = 1e-6
-            std = torch.sqrt(var + eps)
-            normalizer = (mean.to(device), std.to(device))
-            print(f"[policy] Empirical normalization: count={count}")
-        else:
-            print("[policy] Warning: unrecognized normalizer format, skipping")
+    norm_state = ckpt.get("obs_normalizer") or ckpt.get("obs_norm_state_dict")
+    if norm_state is not None and isinstance(norm_state, dict):
+        mean_val = norm_state.get("mean") if norm_state.get("mean") is not None else norm_state.get("_mean", np.zeros(obs_dim))
+        var_val = norm_state.get("var") if norm_state.get("var") is not None else norm_state.get("_var", np.ones(obs_dim))
+        mean = torch.from_numpy(np.asarray(mean_val, dtype=np.float32))
+        var = torch.from_numpy(np.asarray(var_val, dtype=np.float32))
+        count = norm_state.get("count", 0)
+        std = torch.sqrt(var + 1e-6)
+        normalizer = (mean.to(device), std.to(device))
+        print(f"[policy] Empirical normalization: count={count}")
+    elif norm_state is not None:
+        print("[policy] Warning: unrecognized normalizer format, skipping")
     else:
         print("[policy] No normalizer found in checkpoint")
 
@@ -361,7 +363,7 @@ def main():
     ref_body_quat_w = motion_data["body_quat_w"].astype(np.float32)  # (T, n_bodies, 4)
     ref_body_lin_vel = motion_data["body_lin_vel_w"].astype(np.float32)
     ref_body_ang_vel = motion_data["body_ang_vel_w"].astype(np.float32)
-    motion_fps = float(motion_data["fps"])
+    motion_fps = float(np.asarray(motion_data["fps"]).flat[0])
     n_motion_steps = ref_joint_pos.shape[0]
     print(f"[motion] Loaded: {n_motion_steps} frames, fps={motion_fps}")
     print(f"[motion] joint_pos shape: {ref_joint_pos.shape}, body_pos_w shape: {ref_body_pos_w.shape}")
