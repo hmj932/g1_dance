@@ -9,21 +9,27 @@ tasks:
   train:
     taskId: "TASK_20260811_112"
     taskName: "beyondmimic-g1-dance-train-play-v2"
-    status: 7   # stopped
+    status: 7
     description: "5000 iter train complete; play failed (RTX driver 535.5 < 535.129)"
     checkpoints: "G1/reports/TASK_20260811_112/checkpoints/"
     charts: "G1/reports/TASK_20260811_112/charts/"
 
-  play:
+  play_v1:
     taskId: "TASK_20260811_226"
     taskName: "beyondmimic-g1-play-video-v1"
-    status: 3   # running
-    description: "play-only, loads model_4999 from TASK_112; L20 GPU (driver newer)"
+    status: 6
+    description: "failed early: pip ReadTimeout to files.pythonhosted.org"
+
+  play_v2:
+    taskId: "TASK_20260812_139"
+    taskName: "beyondmimic-g1-play-video-v2"
+    status: 7
+    description: "pip OK (bb0795d); hung after Isaac RTX driver verify fail (535.5 < 535.129) on L20; stopped to save quota"
     sourceCheckpoint: "upload/2026/8/11/model_4999_20260811155553A833.pt"
-    videos: "G1/reports/TASK_20260811_226/videos/"
+    codeCommit: "bb0795d"
 
 notes:
-  - MUST prefix paths with g1_dance/ (platform cwd is /workspace/isaaclab/)
-  - play uses entry_play.py --video --headless --num_envs 2
-  - download artifacts to G1/reports/<TASK_ID>/, NOT inside training repo
-  - proxy required: HTTPS_PROXY=socks5://10.12.201.122:39000
+  - MUST prefix paths with g1_dance/
+  - Flux Isaac play video needs driver >= 535.129; current L20/4090D nodes report 535.5
+  - fallback: local MuJoCo play_mujoco.py with downloaded model_4999.pt
+  - proxy: HTTPS_PROXY=socks5://10.12.201.122:39000

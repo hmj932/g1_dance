@@ -19,3 +19,8 @@ artifacts/
 # Trained models and gradmotion task config (tracked)
 !trained_models/
 !.gm/
+
+# Upstream motion pipeline deps (clone locally when needed; do NOT submodule —
+# GMR alone is ~1.5G of multi-robot mesh assets). See .gitmodules for URLs.
+GMR/
+GVHMR/
