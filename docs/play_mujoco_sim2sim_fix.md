@@ -10,18 +10,18 @@
 > - MJCF：`source/.../mjcf/g1.xml`
 > - 离线分析（与 scripts 分离）：`analysis/compare_mujoco_ref.py`
 > - 相关 KB 卡：`beyondmimic-motion-tracking`、`dance-zui-g1`
-> - 修复提交：`6edbd23`（关节 remap + base_lin_vel）
+> - 相关提交：`c6070c7`（§0 启动期）、`6edbd23`（§1 关节 remap + §2 速度系）
 
 ---
 
 ## TL;DR
 
-| # | 问题 | 严重度 | 根因 | 解决 | 谁修的 |
-|---|------|--------|------|------|--------|
-| 0 | 起不来（启动即崩） | **阻断** | checkpoint 键名 / normalizer 键名 / fps 数组三处不匹配 | `ckpt.get(...)` 兼容键名；`_mean/_var` 回退；`fps` 取 `.flat[0]` | Cursor（c6070c7） |
-| 1 | 开局秒摔 | **主因** | 关节顺序：npz/策略=PhysX BFS，g1.xml=深度优先，脚本无 remap | obs/ctrl 两边界做 Isaac↔MuJoCo 置换 | GLM/Claude |
-| 1b | 自检不叫停 | 次要 | frame0 自检只 `print` 不退出 | mismatch 时 `raise SystemExit` | Cursor |
-| 2 | 跟踪变差 | 质量级 | base_lin_vel 坐标系：MuJoCo 线速=world，Isaac 要 body | `quat_rotate_inv(root_quat, qvel[0:3])` | Cursor |
+| # | 问题 | 严重度 | 根因 | 解决 | 提交 |
+|---|------|--------|------|------|------|
+| 0 | 起不来（启动即崩） | **阻断** | checkpoint 键名 / normalizer 键名 / fps 数组三处不匹配 | `ckpt.get(...)` 兼容键名；`_mean/_var` 回退；`fps` 取 `.flat[0]` | `c6070c7` |
+| 1 | 开局秒摔 | **主因** | 关节顺序：npz/策略=PhysX BFS，g1.xml=深度优先，脚本无 remap | obs/ctrl 两边界做 Isaac↔MuJoCo 置换 | `6edbd23` |
+| 1b | 自检不叫停 | 次要 | frame0 自检只 `print` 不退出 | mismatch 时 `raise SystemExit` | `6edbd23` |
+| 2 | 跟踪变差 | 质量级 | base_lin_vel 坐标系：MuJoCo 线速=world，Isaac 要 body | `quat_rotate_inv(root_quat, qvel[0:3])` | `6edbd23` |
 | 3 | 物理 sim2sim 差异 | 遗留 | MuJoCo vs PhysX 物理不同 | 不可在此脚本「修」，以 Isaac 基线评估 | — |
 
 ---
@@ -29,7 +29,7 @@
 ## 0. 前置：MuJoCo 根本跑不起来（启动即崩）
 
 在关节 remap 之前还有更早一阶段：`play_mujoco.py` **一启动就崩**，进不了回放。
-三个启动期 bug，都在提交 `c6070c7`（2026-08-11，Cursor + hanmingjun，"fix local MuJoCo play"）修掉。
+三个启动期 bug，都在提交 `c6070c7`（2026-08-11，"fix local MuJoCo play"）修掉。
 > 这阶段是"跑不起来"，不是"跑起来摔"。先过这关，才到 §1 的秒摔。
 
 ### 0.1 策略 checkpoint 键名不匹配（KeyError）
@@ -124,7 +124,7 @@ CHECK B  npz[0] == MuJoCo 顺序 default（原喂法）→ False  （同样数�
 - 角速度：MuJoCo 已是 body 系 == Isaac `root_ang_vel_b`，**不动**。
 
 > t=0 base 朝向 identity，world==body，无差别；base 转起来才分叉 → 只影响跟踪质量，**不影响开局**。
-> 这是 Cursor 用 IsaacLab 源码定档后落地的（脚本里 isaaclab 不在本机，源码引用见 Cursor）。
+> 该结论据 `isaaclab/envs/mdp/observations.py` 源码（`base_lin_vel`/`base_ang_vel` 返回 `root_*_vel_b`）；isaaclab 不在本机环境，引用源码为准。
 
 ---
 
@@ -151,10 +151,9 @@ CHECK B  npz[0] == MuJoCo 顺序 default（原喂法）→ False  （同样数�
 | `base_lin_vel`（~L595） | `quat_rotate_inv(root_quat_w, qvel[0:3])`（world→body） |
 | `base_ang_vel`（~L596） | `data.qvel[3:6]`（body，不动） |
 
-修复分工：
-- **Cursor**（c6070c7，2026-08-11，本对话之前）：§0 三处启动期 bug（checkpoint 键名、normalizer 键名、fps 数组）。
-- **GLM/Claude**（6edbd23，本对话）：§1 关节 remap（核心）、frame0 自检（初版 WARNING）、init、MuJoCo 混合系注释改正。
-- **Cursor**（本对话）：§1b frame0 自检升级硬失败、§2 base_lin_vel world→body 旋转（IsaacLab 源码定档）。
+提交时间线（git 事实，按提交归类，不涉人工分工）：
+- `c6070c7`（2026-08-11，"fix local MuJoCo play"）：§0 三处启动期 bug（checkpoint 键名、normalizer 键名、fps 数组）。
+- `6edbd23`（"Fix play_mujoco sim2sim: Isaac↔MuJoCo joint remap + base_lin_vel frame"）：§1 关节 remap + frame0 自检 + init + §2 base_lin_vel 速度系。
 
 ---
 
