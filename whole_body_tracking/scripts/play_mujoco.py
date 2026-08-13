@@ -19,6 +19,9 @@ Usage:
         --speed 0.5        # slow motion (0.5x)
         --no_normalization # disable obs normalization (debug)
         --seed 42          # fixed seed
+        --record out.mp4   # headless offscreen render to video (no viewer)
+        --record_steps 750 # policy steps to record (default: one motion pass)
+        --record_fps 50    # output video frame rate
 """
 
 from __future__ import annotations
@@ -95,6 +98,28 @@ _DEFAULT_JOINT_POS = {
 }
 
 INIT_HEIGHT = 0.76  # G1_CYLINDER_CFG.init_state.pos[2]
+
+# Isaac/PhysX BFS DOF order — the joint order used by the .npz motion file and the
+# trained RSL-RL policy (PhysX parses the articulation tree breadth-first).
+# MuJoCo's g1.xml instead lists joints depth-first (full left leg, full right leg,
+# waist, full left arm, full right arm), so feeding MuJoCo state straight into the
+# observation / applying the policy action straight to MuJoCo ctrl scrambles joints
+# and the robot collapses on the first action. Verified against dance_zui.npz frame 0.
+ISAAC_JOINT_ORDER = [
+    "left_hip_pitch_joint",  "right_hip_pitch_joint", "waist_yaw_joint",
+    "left_hip_roll_joint",   "right_hip_roll_joint",  "waist_roll_joint",
+    "left_hip_yaw_joint",    "right_hip_yaw_joint",   "waist_pitch_joint",
+    "left_knee_joint",       "right_knee_joint",
+    "left_shoulder_pitch_joint", "right_shoulder_pitch_joint",
+    "left_ankle_pitch_joint",    "right_ankle_pitch_joint",
+    "left_shoulder_roll_joint",  "right_shoulder_roll_joint",
+    "left_ankle_roll_joint",     "right_ankle_roll_joint",
+    "left_shoulder_yaw_joint",   "right_shoulder_yaw_joint",
+    "left_elbow_joint",          "right_elbow_joint",
+    "left_wrist_roll_joint",     "right_wrist_roll_joint",
+    "left_wrist_pitch_joint",    "right_wrist_pitch_joint",
+    "left_wrist_yaw_joint",     "right_wrist_yaw_joint",
+]
 
 # Sim params (from tracking_env_cfg.py)
 SIM_DT = 0.005       # 200 Hz physics
@@ -281,6 +306,39 @@ def quat_to_rotmat(q: np.ndarray) -> np.ndarray:
     ])
 
 
+def save_video(frames: list[np.ndarray], output_path: str, fps: float) -> str:
+    """Write RGB frames to mp4 (imageio) or gif (PIL fallback). Returns final path."""
+    if not frames:
+        raise ValueError("No frames to save")
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
+
+    try:
+        import imageio.v3 as iio
+
+        iio.imwrite(output_path, np.stack(frames), fps=fps, codec="libx264")
+        print(f"[record] Saved {len(frames)} frames → {output_path} ({fps:.0f} fps, mp4)")
+        return output_path
+    except ImportError:
+        gif_path = os.path.splitext(output_path)[0] + ".gif"
+        from PIL import Image
+
+        pil_frames = [Image.fromarray(f) for f in frames]
+        duration_ms = int(round(1000.0 / fps))
+        pil_frames[0].save(
+            gif_path,
+            save_all=True,
+            append_images=pil_frames[1:],
+            duration=duration_ms,
+            loop=0,
+        )
+        print(
+            f"[record] imageio not installed — saved GIF instead: {gif_path} "
+            f"({len(frames)} frames, {fps:.0f} fps)"
+        )
+        return gif_path
+
+
 def subtract_frame_transform(
     pos1: np.ndarray, quat1: np.ndarray,
     pos2: np.ndarray, quat2: np.ndarray,
@@ -313,6 +371,12 @@ def main():
                         help="Disable observation normalization")
     parser.add_argument("--seed", type=int, default=None,
                         help="Random seed")
+    parser.add_argument("--record", type=str, default=None,
+                        help="Save offscreen video to this path (headless, no viewer)")
+    parser.add_argument("--record_steps", type=int, default=0,
+                        help="Policy steps to record (0 = one full motion, no loop)")
+    parser.add_argument("--record_fps", type=float, default=50.0,
+                        help="Output video frame rate")
     args = parser.parse_args()
 
     if args.seed is not None:
@@ -349,9 +413,25 @@ def main():
     n_dof = len(joint_names_dof)
     print(f"[mjoco] DOF joints ({n_dof}): {joint_names_dof}")
 
-    # Build per-joint arrays
-    default_pos, kp, kd, action_scale = build_joint_arrays(joint_names_dof)
-    print(f"[mjoco] Default pos: {default_pos}")
+    # Build per-joint arrays in MuJoCo (XML) order — for direct qpos/qvel/ctrl addressing
+    default_pos_mj, kp_mj, kd_mj, action_scale_mj = build_joint_arrays(joint_names_dof)
+
+    # Isaac/PhysX BFS order is the .npz + policy native order; MuJoCo's XML order is
+    # depth-first. Permutations: isaac2mj[k] = MuJoCo index of Isaac joint k;
+    # mj2isaac = inverse. Without this remap the obs (joint_pos_rel, joint_vel) and
+    # the applied action land on the wrong joints → the robot falls on the first step.
+    isaac2mj = np.array([joint_names_dof.index(n) for n in ISAAC_JOINT_ORDER])
+    mj2isaac = np.argsort(isaac2mj)  # inverse permutation
+    assert set(joint_names_dof) == set(ISAAC_JOINT_ORDER), \
+        "ISAAC_JOINT_ORDER must match the MJCF joint set"
+    # Policy-native (Isaac-order) arrays — what the obs / PD math must use
+    default_pos  = default_pos_mj[isaac2mj]
+    kp           = kp_mj[isaac2mj]
+    kd           = kd_mj[isaac2mj]
+    action_scale = action_scale_mj[isaac2mj]
+    reordered = int(np.count_nonzero(mj2isaac != np.arange(n_dof)))
+    print(f"[mjoco] Joint remap Isaac↔MuJoCo: {reordered}/{n_dof} joints reordered")
+    print(f"[mjoco] Default pos (Isaac): {default_pos}")
     print(f"[mjoco] KP range: [{kp.min():.2f}, {kp.max():.2f}]")
     print(f"[mjoco] Action scale range: [{action_scale.min():.4f}, {action_scale.max():.4f}]")
 
@@ -367,6 +447,20 @@ def main():
     n_motion_steps = ref_joint_pos.shape[0]
     print(f"[motion] Loaded: {n_motion_steps} frames, fps={motion_fps}")
     print(f"[motion] joint_pos shape: {ref_joint_pos.shape}, body_pos_w shape: {ref_body_pos_w.shape}")
+
+    # Self-check: frame 0 must equal the Isaac-ordered default standing pose. This
+    # confirms both the npz joint order and ISAAC_JOINT_ORDER. If it fails, the remap
+    # is wrong — do NOT proceed (the robot will fall on the first action).
+    if np.allclose(ref_joint_pos[0], default_pos, atol=1e-3):
+        print("[motion] frame 0 == default standing pose ✓ (Isaac joint order verified)")
+    else:
+        print("[ERROR] motion frame 0 != default pose (Isaac order)! remap is likely wrong")
+        print(f"[ERROR]   frame0 = {ref_joint_pos[0]}")
+        print(f"[ERROR]   default= {default_pos}")
+        raise SystemExit(
+            "Aborting: ISAAC_JOINT_ORDER / npz joint order mismatch — "
+            "continuing would scramble actions and the robot would fall."
+        )
 
     # Map body names to .npz body indices
     # The .npz stores ALL 30 bodies in PhysX BFS order (NOT the cfg body_names order).
@@ -431,9 +525,9 @@ def main():
     data.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]  # identity quaternion (w,x,y,z)
     data.qvel[0:6] = 0.0
 
-    # Set joint positions to default
+    # Set joint positions to default (MuJoCo order — direct qpos addressing)
     for i, adr in enumerate(joint_qpos_adr):
-        data.qpos[adr] = default_pos[i]
+        data.qpos[adr] = default_pos_mj[i]
     for i, adr in enumerate(joint_dof_adr):
         data.qvel[adr] = 0.0
 
@@ -461,11 +555,31 @@ def main():
         print(f"[WARNING] Obs dimension mismatch! Expected {expected_obs_dim}, policy expects {obs_dim}")
         print("[WARNING] The script may not work correctly. Check joint count and observation terms.")
 
-    print("\n[INFO] Starting MuJoCo playback. Close the viewer window to exit.\n")
+    record_mode = args.record is not None
+    max_record_steps = args.record_steps if args.record_steps > 0 else n_motion_steps
+    renderer = None
+    cam = None
+    frames: list[np.ndarray] = []
 
-    with mujoco.viewer.launch_passive(model, data) as viewer:
+    if record_mode:
+        renderer = mujoco.Renderer(model, height=480, width=640)
+        cam = mujoco.MjvCamera()
+        cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+        cam.trackbodyid = anchor_body_mj_id
+        cam.distance = 3.5
+        cam.azimuth = 135.0
+        cam.elevation = -15.0
+        print(f"\n[INFO] Recording {max_record_steps} policy steps → {args.record}\n")
+    else:
+        print("\n[INFO] Starting MuJoCo playback. Close the viewer window to exit.\n")
+
+    viewer_ctx = None if record_mode else mujoco.viewer.launch_passive(model, data)
+    try:
+        viewer = viewer_ctx.__enter__() if viewer_ctx is not None else None
         step_count = 0
-        while viewer.is_running():
+        while record_mode or viewer.is_running():
+            if record_mode and step_count >= max_record_steps:
+                break
             # Clamp motion step
             t = min(motion_step, n_motion_steps - 1)
 
@@ -473,12 +587,17 @@ def main():
             # Anchor body (torso_link) world pose
             robot_anchor_pos_w = data.xpos[anchor_body_mj_id].copy()
             robot_anchor_quat_w = data.xquat[anchor_body_mj_id].copy()
-            # MuJoCo qvel for free joint: [0:3] = lin vel (body frame), [3:6] = ang vel (body frame)
-            base_lin_vel = data.qvel[0:3].copy()
+            # MuJoCo free-joint qvel is MIXED (empirically verified): [0:3] linear = WORLD,
+            # [3:6] angular = BODY. Isaac Lab mdp.base_lin_vel / base_ang_vel both return
+            # root_*_vel_b (asset root / body frame) — see isaaclab/envs/mdp/observations.py.
+            # Rotate linear velocity world→body to match training obs.
+            root_quat_w = data.qpos[3:7].copy()  # free-joint quat (w,x,y,z)
+            base_lin_vel = quat_rotate_inv(root_quat_w, data.qvel[0:3].copy())
             base_ang_vel = data.qvel[3:6].copy()
-            # Joint positions and velocities
-            joint_pos = np.array([data.qpos[adr] for adr in joint_qpos_adr])
-            joint_vel = np.array([data.qvel[adr] for adr in joint_dof_adr])
+            # Joint positions and velocities — MuJoCo reads in XML order; remap to
+            # Isaac/PhysX BFS order (policy-native) before building the observation.
+            joint_pos = np.array([data.qpos[adr] for adr in joint_qpos_adr])[isaac2mj]
+            joint_vel = np.array([data.qvel[adr] for adr in joint_dof_adr])[isaac2mj]
 
             # ── Get reference motion at current step ──
             ref_jpos = ref_joint_pos[t]      # (n_dof,)
@@ -501,7 +620,7 @@ def main():
             rotmat_b = quat_to_rotmat(anchor_quat_b)
             obs_anchor_ori_b = rotmat_b[:, :2].flatten()  # (6,)
 
-            # 4-5. base velocities (already in body frame from MuJoCo free joint)
+            # 4-5. base velocities in body/root frame (matches Isaac Lab base_*_vel)
             obs_base_lin_vel = base_lin_vel  # (3,)
             obs_base_ang_vel = base_ang_vel  # (3,)
 
@@ -543,41 +662,53 @@ def main():
 
             # ── PD control + simulation step (DECIMATION sub-steps) ──
             for _ in range(DECIMATION):
-                # PD torque: tau = kp * (target - current) - kd * vel
-                tau = kp * (target_pos - joint_pos) - kd * joint_vel
-                # Clamp to effort limits
+                # PD torque in Isaac order: tau = kp*(target - current) - kd*vel
+                tau_isaac = kp * (target_pos - joint_pos) - kd * joint_vel
+                # Remap Isaac → MuJoCo/actuator order for data.ctrl
+                tau_mj = tau_isaac[mj2isaac]
+                # Clamp to effort limits (MuJoCo order, per joint name)
                 for i, adr in enumerate(joint_dof_adr):
                     effort_limit, _, _ = _match_joint_params(joint_names_dof[i])
-                    tau[i] = np.clip(tau[i], -effort_limit, effort_limit)
+                    tau_mj[i] = np.clip(tau_mj[i], -effort_limit, effort_limit)
                 
                 # Set control torques
-                data.ctrl[:] = tau
+                data.ctrl[:] = tau_mj
                 
                 # Step simulation
                 mujoco.mj_step(model, data)
                 
-                # Update joint readings
-                joint_pos = np.array([data.qpos[adr] for adr in joint_qpos_adr])
-                joint_vel = np.array([data.qvel[adr] for adr in joint_dof_adr])
+                # Update joint readings (MuJoCo → Isaac order)
+                joint_pos = np.array([data.qpos[adr] for adr in joint_qpos_adr])[isaac2mj]
+                joint_vel = np.array([data.qvel[adr] for adr in joint_dof_adr])[isaac2mj]
 
             # ── Advance motion and timing ──
             motion_step += 1
             step_count += 1
 
-            # Loop the motion
+            if record_mode:
+                renderer.update_scene(data, camera=cam)
+                frames.append(renderer.render().copy())
+            else:
+                viewer.sync()
+                if args.speed > 0:
+                    time.sleep(POLICY_DT / args.speed)
+
+            # Loop the motion (viewer only; recording stops at max_record_steps / motion end)
             if motion_step >= n_motion_steps:
+                if record_mode:
+                    break
                 print(f"[playback] Motion ended at step {step_count}, looping...")
                 motion_step = 0
                 last_action = np.zeros(action_dim, dtype=np.float32)
+    finally:
+        if viewer_ctx is not None:
+            viewer_ctx.__exit__(None, None, None)
 
-            # ── Sync viewer ──
-            viewer.sync()
-
-            # ── Pace the playback ──
-            if args.speed > 0:
-                time.sleep(POLICY_DT / args.speed)
-
-    print("[INFO] Playback ended.")
+    if record_mode:
+        out_path = save_video(frames, args.record, args.record_fps)
+        print(f"[INFO] Recording complete: {out_path}")
+    else:
+        print("[INFO] Playback ended.")
 
 
 if __name__ == "__main__":
