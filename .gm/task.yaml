@@ -6,6 +6,16 @@ project:
   projectName: "G1"
 
 tasks:
+
+  dance2_subject3:
+    taskId: "TASK_20260813_158"
+    taskName: "beyondmimic-g1-dance2-subject3-ctp"
+    status: running
+    description: "convert dance2_subject3.csv→npz then train+play; commit e9bec68; num_envs=4096 max_iter=5000"
+    motionCsv: "whole_body_tracking/motions/csv/dance2_subject3.csv"
+    motionNpz: "motions/dance2_subject3.npz (produced on Flux; also /personal/motions/)"
+    reports: "G1/reports/TASK_20260813_158/"
+
   train:
     taskId: "TASK_20260811_112"
     taskName: "beyondmimic-g1-dance-train-play-v2"
