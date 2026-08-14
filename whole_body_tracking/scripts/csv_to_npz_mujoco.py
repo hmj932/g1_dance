@@ -6,7 +6,14 @@ but runs FK in MuJoCo and writes bodies/joints in **Isaac/PhysX BFS order**
 so the NPZ is drop-in compatible with ``Tracking-Flat-G1-v0``.
 
 Why this exists: Flux Isaac ``csv_to_npz`` can hang on Omniverse extension
-downloads when spawning URDF; local MuJoCo is enough for the motion file.
+downloads when spawning URDF; local MuJoCo was tried as a shortcut.
+
+**WARNING (verified 2026-08-14):** Output is NOT valid for Isaac Lab /
+Flux training (``entry_train.py``). Same npz schema, wrong FK/joint semantics
+vs PhysX — TASK_173 dance2: reward~3 @5000 iter vs Isaac npz TASK_072
+reward~30 @~2050 iter. Use Isaac ``csv_to_npz.py`` for training motion;
+this script is for local inspection / debugging only. See
+``docs/G1/csv_to_npz_mujoco_dead_end.md``.
 
 Usage::
 
