@@ -18,9 +18,63 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+
+# Flux nodes sometimes time out on files.pythonhosted.org; retry with mirrors.
+_PIP_MIRRORS: list[list[str]] = [
+    [],
+    [
+        "-i",
+        "https://pypi.tuna.tsinghua.edu.cn/simple",
+        "--trusted-host",
+        "pypi.tuna.tsinghua.edu.cn",
+    ],
+    [
+        "-i",
+        "https://mirrors.aliyun.com/pypi/simple/",
+        "--trusted-host",
+        "mirrors.aliyun.com",
+    ],
+]
+
+
+def _pip_install_editable(ext_path: str) -> None:
+    """Install extension with timeout bumps, mirrors, and no-build-isolation fallback."""
+    env = os.environ.copy()
+    env.setdefault("PIP_DEFAULT_TIMEOUT", "120")
+    last_err: BaseException | None = None
+
+    for mirror_idx, mirror_args in enumerate(_PIP_MIRRORS):
+        for no_iso in (False, True):
+            cmd = [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-e",
+                ext_path,
+                "--default-timeout",
+                "120",
+            ]
+            if no_iso:
+                cmd.append("--no-build-isolation")
+            cmd.extend(mirror_args)
+            label = f"mirror={mirror_idx} no_build_isolation={no_iso}"
+            print(f"[entry] pip install -e ({label})")
+            print(f"[entry] {' '.join(cmd)}")
+            try:
+                subprocess.check_call(cmd, env=env)
+                return
+            except subprocess.CalledProcessError as exc:
+                last_err = exc
+                print(f"[entry] pip failed exit={exc.returncode}; retrying...")
+                time.sleep(2)
+
+    assert last_err is not None
+    raise last_err
 
 
 def main() -> None:
@@ -29,8 +83,7 @@ def main() -> None:
 
     # Step 1 — install the extension (creates an importable egg-link)
     ext_path = os.path.join(REPO_ROOT, "source", "whole_body_tracking")
-    print(f"[entry] pip install -e {ext_path}")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-e", ext_path])
+    _pip_install_editable(ext_path)
 
     # Step 2 — hand off to train.py (replaces this process)
     train_script = os.path.join(SCRIPT_DIR, "rsl_rl", "train.py")
