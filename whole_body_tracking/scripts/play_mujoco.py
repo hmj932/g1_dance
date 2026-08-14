@@ -448,18 +448,29 @@ def main():
     print(f"[motion] Loaded: {n_motion_steps} frames, fps={motion_fps}")
     print(f"[motion] joint_pos shape: {ref_joint_pos.shape}, body_pos_w shape: {ref_body_pos_w.shape}")
 
-    # Self-check: frame 0 must equal the Isaac-ordered default standing pose. This
-    # confirms both the npz joint order and ISAAC_JOINT_ORDER. If it fails, the remap
-    # is wrong — do NOT proceed (the robot will fall on the first action).
+    # Self-check: if motion starts at standing default, frame 0 must match
+    # Isaac-ordered default (catches joint-order scramble). Motions that begin
+    # mid-choreography (e.g. LAFAN dance2) legitimately differ — warn only.
     if np.allclose(ref_joint_pos[0], default_pos, atol=1e-3):
         print("[motion] frame 0 == default standing pose ✓ (Isaac joint order verified)")
     else:
-        print("[ERROR] motion frame 0 != default pose (Isaac order)! remap is likely wrong")
-        print(f"[ERROR]   frame0 = {ref_joint_pos[0]}")
-        print(f"[ERROR]   default= {default_pos}")
-        raise SystemExit(
-            "Aborting: ISAAC_JOINT_ORDER / npz joint order mismatch — "
-            "continuing would scramble actions and the robot would fall."
+        per_joint = np.abs(ref_joint_pos[0] - default_pos)
+        # "Looks like standing start but wrong order": most joints near default,
+        # a few scrambled. Mid-dance starts have large median deviation.
+        median_err = float(np.median(per_joint))
+        max_err = float(per_joint.max())
+        if median_err < 0.15 and max_err < 1.0:
+            print("[ERROR] motion frame 0 ≈ standing but != default — remap likely wrong")
+            print(f"[ERROR]   median_err={median_err:.4f} max_err={max_err:.4f}")
+            print(f"[ERROR]   frame0 = {ref_joint_pos[0]}")
+            print(f"[ERROR]   default= {default_pos}")
+            raise SystemExit(
+                "Aborting: ISAAC_JOINT_ORDER / npz joint order mismatch — "
+                "continuing would scramble actions and the robot would fall."
+            )
+        print(
+            f"[motion] frame 0 != default standing (median_err={median_err:.3f}, "
+            f"max_err={max_err:.3f}) — non-standing start, skip hard joint-order check"
         )
 
     # Map body names to .npz body indices
@@ -516,23 +527,24 @@ def main():
         normalizer = None
         print("[policy] Normalization DISABLED by user flag")
 
-    # ── Initialize robot state ──
-    # Reset to default position
+    # ── Initialize robot state from motion frame 0 ──
+    # Standing default only matches motions that start there (e.g. dance_zui).
+    # Mid-dance starts (dance2) must seed qpos from the reference or the first
+    # policy steps fight a huge pose jump and fall.
     mujoco.mj_resetData(model, data)
-    
-    # Set free joint position
-    data.qpos[0:3] = [0.0, 0.0, INIT_HEIGHT]
-    data.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]  # identity quaternion (w,x,y,z)
+    data.qpos[0:3] = ref_body_pos_w[0, 0]  # pelvis world pos
+    data.qpos[3:7] = ref_body_quat_w[0, 0]  # pelvis wxyz
     data.qvel[0:6] = 0.0
-
-    # Set joint positions to default (MuJoCo order — direct qpos addressing)
-    for i, adr in enumerate(joint_qpos_adr):
-        data.qpos[adr] = default_pos_mj[i]
-    for i, adr in enumerate(joint_dof_adr):
-        data.qvel[adr] = 0.0
-
+    # joint_pos is Isaac order → write into MuJoCo qpos via isaac2mj
+    for isaac_i, mj_i in enumerate(isaac2mj):
+        data.qpos[joint_qpos_adr[mj_i]] = ref_joint_pos[0, isaac_i]
+        data.qvel[joint_dof_adr[mj_i]] = ref_joint_vel[0, isaac_i]
     mujoco.mj_forward(model, data)
-    print(f"[init] Robot at height {INIT_HEIGHT}m with default joint positions")
+    print(
+        f"[init] Seeded from motion frame 0 "
+        f"(pelvis_z={data.qpos[2]:.3f}, |qpos-default|_med="
+        f"{float(np.median(np.abs(ref_joint_pos[0] - default_pos))):.3f})"
+    )
 
     # ── Main playback loop ──
     motion_step = 0
