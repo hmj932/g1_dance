@@ -1,0 +1,21 @@
+{
+  "taskBaseInfo": {
+    "projectId": "PRO_20260814_006",
+    "taskType": "1",
+    "trainType": "1",
+    "taskName": "beyondmimic-g1-dance2-isaac-train-v2",
+    "taskTag": ["g1", "dance", "dance2", "isaac-npz"],
+    "goodsId": "ESKU000001",
+    "imageId": "BJX00000028",
+    "imageVersion": "V000127",
+    "personalDataPath": "/personal"
+  },
+  "taskCodeInfo": {
+    "codeType": "2",
+    "codeUrl": "[{\"codeUrl\":\"https://github.com/hmj932/g1_dance.git\",\"versionType\":\"1\",\"versionName\":\"main\"}]",
+    "mainCodeUri": "g1_dance/whole_body_tracking/scripts/entry_train.py",
+    "startScript": "gm-run g1_dance/whole_body_tracking/scripts/entry_train.py --task=Tracking-Flat-G1-v0 --motion_file motions/dance2_subject3_isaac.npz --headless --num_envs 4096 --max_iterations 5000",
+    "isOpen": "1"
+  },
+  "runtimeReminderConfig": { "enableRuntimeReminder": false, "reminderDurations": [] }
+}

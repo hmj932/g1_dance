@@ -2,19 +2,52 @@
 # BeyondMimic G1 29DOF Dance Motion Tracking
 
 project:
-  projectId: "PRO_20260811_003"
+  legacyProjectId: "PRO_20260811_003"  # yowokis920@primetor.com
+  projectId: "PRO_20260814_006"        # limxmsoavn9u0f6k6i@emalupe.com
   projectName: "G1"
 
 tasks:
 
-  dance2_subject3:
-    taskId: "TASK_20260813_158"
-    taskName: "beyondmimic-g1-dance2-subject3-ctp"
-    status: running
-    description: "convert dance2_subject3.csv→npz then train+play; commit e9bec68; num_envs=4096 max_iter=5000"
+  dance2_isaac_train:
+    taskId: "TASK_20260814_069"
+    taskName: "beyondmimic-g1-dance2-isaac-train"
+    status: 6
+    account: "yowokis920@primetor.com"
+    failReason: "entry_train pip ReadTimeout (no mirror retry); account budget exhausted"
+    description: "failed ~213s; pip install -e timeout on files.pythonhosted.org"
+    motionNpz: "whole_body_tracking/motions/dance2_subject3_isaac.npz"
+    reports: "G1/reports/TASK_20260814_069/"
+
+  dance2_isaac_train_v2:
+    taskId: "TASK_20260814_072"
+    taskName: "beyondmimic-g1-dance2-isaac-train-v2"
+    status: 5
+    account: "limxmsoavn9u0f6k6i@emalupe.com"
+    projectId: "PRO_20260814_006"
+    description: "Isaac npz train done 5000 iter; reward 33.85 ep 466 body_err 0.045 (beats dance_zui); MuJoCo 60s no fall jp_rmse~0.17"
+    motionNpz: "whole_body_tracking/motions/dance2_subject3_isaac.npz"
+    codeCommit: "ed54e86"
+    runtimeSec: 7081
+    finalMetrics:
+      iter4999: { mean_reward: 33.85, episode_length: 465.88, error_body_pos: 0.0447, error_joint_pos: 0.656 }
+    checkpoints: "G1/reports/TASK_20260814_072/checkpoints/"
+    charts: "G1/reports/TASK_20260814_072/charts/"
+    mujocoVideo: "G1/reports/TASK_20260814_072/videos/dance2_mujoco_60s.mp4"
+    analysis: "G1/reports/TASK_20260814_072/analysis/"
+    reports: "G1/reports/TASK_20260814_072/"
+
+  dance2_subject3_mujoco:
+    taskId: "TASK_20260813_173"
+    taskName: "beyondmimic-g1-dance2-train-only"
+    status: 5
+    description: "train-only done (~2.1h); reward~4.5 episode~132 body_err~0.147 (weaker than dance_zui baseline)"
     motionCsv: "whole_body_tracking/motions/csv/dance2_subject3.csv"
-    motionNpz: "motions/dance2_subject3.npz (produced on Flux; also /personal/motions/)"
-    reports: "G1/reports/TASK_20260813_158/"
+    motionNpz: "whole_body_tracking/motions/dance2_subject3.npz"
+    convertNote: "csv_to_npz_mujoco.py offline"
+    checkpoints: "G1/reports/TASK_20260813_173/checkpoints/"
+    charts: "G1/reports/TASK_20260813_173/charts/"
+    mujocoVideo: "G1/reports/TASK_20260813_173/videos/dance2_mujoco_60s.mp4"
+    reports: "G1/reports/TASK_20260813_173/"
 
   train:
     taskId: "TASK_20260811_112"
