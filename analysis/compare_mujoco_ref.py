@@ -115,13 +115,14 @@ def run_playback(ckpt: Path, motion_path: Path, mjcf: Path, n: int, fps: int):
     actor, normalizer, _obs_dim, action_dim = pm.load_policy(str(ckpt), "cpu")
 
     mujoco.mj_resetData(model, data)
-    data.qpos[0:3] = [0.0, 0.0, pm.INIT_HEIGHT]
-    data.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]
+    # Match play_mujoco: seed from motion frame 0 (standing default is wrong for
+    # mid-dance starts such as LAFAN dance2).
+    data.qpos[0:3] = ref_bp[0, 0]
+    data.qpos[3:7] = ref_bq[0, 0]
     data.qvel[0:6] = 0.0
-    for i, adr in enumerate(joint_qpos_adr):
-        data.qpos[adr] = default_pos_mj[i]
-    for i, adr in enumerate(joint_dof_adr):
-        data.qvel[adr] = 0.0
+    for isaac_i, mj_i in enumerate(isaac2mj):
+        data.qpos[joint_qpos_adr[mj_i]] = ref_jp[0, isaac_i]
+        data.qvel[joint_dof_adr[mj_i]] = ref_jv[0, isaac_i]
     mujoco.mj_forward(model, data)
 
     mj_jp = np.zeros((n, n_dof), np.float32)

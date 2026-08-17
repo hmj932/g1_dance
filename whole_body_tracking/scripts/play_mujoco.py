@@ -339,6 +339,14 @@ def save_video(frames: list[np.ndarray], output_path: str, fps: float) -> str:
         return gif_path
 
 
+def _open_video_writer(output_path: str, fps: float):
+    """Streaming mp4 writer so we do not hold all frames in RAM."""
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)) or ".", exist_ok=True)
+    import imageio.v2 as imageio
+
+    return imageio.get_writer(output_path, fps=fps, codec="libx264", macro_block_size=1)
+
+
 def subtract_frame_transform(
     pos1: np.ndarray, quat1: np.ndarray,
     pos2: np.ndarray, quat2: np.ndarray,
@@ -571,7 +579,7 @@ def main():
     max_record_steps = args.record_steps if args.record_steps > 0 else n_motion_steps
     renderer = None
     cam = None
-    frames: list[np.ndarray] = []
+    video_writer = None
 
     if record_mode:
         renderer = mujoco.Renderer(model, height=480, width=640)
@@ -581,6 +589,7 @@ def main():
         cam.distance = 3.5
         cam.azimuth = 135.0
         cam.elevation = -15.0
+        video_writer = _open_video_writer(args.record, args.record_fps)
         print(f"\n[INFO] Recording {max_record_steps} policy steps → {args.record}\n")
     else:
         print("\n[INFO] Starting MuJoCo playback. Close the viewer window to exit.\n")
@@ -699,7 +708,9 @@ def main():
 
             if record_mode:
                 renderer.update_scene(data, camera=cam)
-                frames.append(renderer.render().copy())
+                video_writer.append_data(renderer.render())
+                if step_count % 500 == 0:
+                    print(f"[record] step {step_count}/{max_record_steps}", flush=True)
             else:
                 viewer.sync()
                 if args.speed > 0:
@@ -715,10 +726,12 @@ def main():
     finally:
         if viewer_ctx is not None:
             viewer_ctx.__exit__(None, None, None)
+        if video_writer is not None:
+            video_writer.close()
+            video_writer = None
 
     if record_mode:
-        out_path = save_video(frames, args.record, args.record_fps)
-        print(f"[INFO] Recording complete: {out_path}")
+        print(f"[INFO] Recording complete: {args.record}")
     else:
         print("[INFO] Playback ended.")
 
