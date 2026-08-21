@@ -121,26 +121,26 @@ if [[ "$STAGE" == all || "$STAGE" == env ]]; then
   else
     "$CONDA" env list | awk '{print $1}' | grep -qx gvhmr || "$CONDA" create -y -n gvhmr python=3.10 "${CONDA_MAIN[@]}"
     log "  gvhmr: 装 requirements.txt（torch2.3+cu121 / pytorch3d / pycolmap / smplx）+ pip install -e ."
-    # numpy 1.23.5 老 pin 会逼 pip 对 opencv/matplotlib/scikit-image 回溯试一堆版本（每个都下~70MB）；钉到 numpy 兼容版本省掉回溯
-    sed -i \
-      -e 's#^opencv-python$#opencv-python==4.10.0.84#' \
-      -e 's#^matplotlib$#matplotlib<3.10#' \
-      -e 's#^scikit-image$#scikit-image<0.25#' \
-      "$G1_ROOT/GVHMR/requirements.txt"
-    # chumpy 是老 sdist，setup.py 里 `import pip`，PEP517 隔离构建环境没 pip → 先备 numpy/setuptools，-r 关构建隔离
-    "$CONDA" run -n gvhmr pip install "${PIP_INDEX[@]}" numpy==1.23.5 "setuptools>=68" wheel
-    PIP_R=("${PIP_INDEX[@]}" --no-build-isolation)
-    # 优先"自己下"（pytorch.org）；装失败再把 torch/torchvision 换成阿里云直链 wheel 重试
-    # （阿里云 pytorch-wheels 不是 PEP503 simple index，不能当 --extra-index-url 用，只能直链）
-    if ! "$CONDA" run -n gvhmr --live-stream pip install "${PIP_R[@]}" -r "$G1_ROOT/GVHMR/requirements.txt"; then
-      log "  ⚠ 自己下失败（多半 download.pytorch.org 不通），torch/torchvision 改阿里云直链 wheel 重试"
+    # 国内盒：pytorch.org 常不通 + 阿里云 pytorch-wheels 非 PEP503 → torch/torchvision 直接用阿里云直链 wheel，删 extra-index
+    if [ "$MIRROR" = "1" ]; then
       sed -i \
         -e '/^--extra-index-url /d' \
         -e 's#^torch==2.3.0+cu121$#torch @ https://mirrors.aliyun.com/pytorch-wheels/cu121/torch-2.3.0%2Bcu121-cp310-cp310-linux_x86_64.whl#' \
         -e 's#^torchvision==0.18.0+cu121$#torchvision @ https://mirrors.aliyun.com/pytorch-wheels/cu121/torchvision-0.18.0%2Bcu121-cp310-cp310-linux_x86_64.whl#' \
         "$G1_ROOT/GVHMR/requirements.txt"
-      "$CONDA" run -n gvhmr --live-stream pip install "${PIP_R[@]}" -r "$G1_ROOT/GVHMR/requirements.txt"
     fi
+    # numpy 1.23.5 老 pin 会逼 pip 对 opencv/matplotlib/scikit-image 回溯试一堆版本；钉到 numpy 兼容版本省掉回溯
+    sed -i \
+      -e 's#^opencv-python$#opencv-python==4.10.0.84#' \
+      -e 's#^matplotlib$#matplotlib<3.10#' \
+      -e 's#^scikit-image$#scikit-image<0.25#' \
+      "$G1_ROOT/GVHMR/requirements.txt"
+    # cython_bbox 的 sdist 缺 src/cython_bbox.c（打包破损，无 cp310 wheel），且 GVHMR/wis3d 都不 import 它 → 注释掉跳过
+    sed -i 's|^cython_bbox$|# cython_bbox  # skipped: broken sdist (no .c), unused by GVHMR/wis3d|' "$G1_ROOT/GVHMR/requirements.txt"
+    # chumpy 是老 sdist，setup.py 里 `import pip`，PEP517 隔离构建环境没 pip → 先备 numpy/setuptools，-r 关构建隔离
+    "$CONDA" run -n gvhmr pip install "${PIP_INDEX[@]}" numpy==1.23.5 "setuptools>=68" wheel
+    PIP_R=("${PIP_INDEX[@]}" --no-build-isolation)
+    "$CONDA" run -n gvhmr --live-stream pip install "${PIP_R[@]}" -r "$G1_ROOT/GVHMR/requirements.txt"
     "$CONDA" run -n gvhmr --live-stream pip install "${PIP_INDEX[@]}" -e "$G1_ROOT/GVHMR"
     gvhmr_env_ok || die "gvhmr env 装完仍 import 失败（hmr4d/pytorch3d）"
   fi
