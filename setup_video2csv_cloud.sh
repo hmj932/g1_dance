@@ -121,6 +121,12 @@ if [[ "$STAGE" == all || "$STAGE" == env ]]; then
   else
     "$CONDA" env list | awk '{print $1}' | grep -qx gvhmr || "$CONDA" create -y -n gvhmr python=3.10 "${CONDA_MAIN[@]}"
     log "  gvhmr: 装 requirements.txt（torch2.3+cu121 / pytorch3d / pycolmap / smplx）+ pip install -e ."
+    # numpy 1.23.5 老 pin 会逼 pip 对 opencv/matplotlib/scikit-image 回溯试一堆版本（每个都下~70MB）；钉到 numpy 兼容版本省掉回溯
+    sed -i \
+      -e 's#^opencv-python$#opencv-python==4.10.0.84#' \
+      -e 's#^matplotlib$#matplotlib<3.10#' \
+      -e 's#^scikit-image$#scikit-image<0.25#' \
+      "$G1_ROOT/GVHMR/requirements.txt"
     # chumpy 是老 sdist，setup.py 里 `import pip`，PEP517 隔离构建环境没 pip → 先备 numpy/setuptools，-r 关构建隔离
     "$CONDA" run -n gvhmr pip install "${PIP_INDEX[@]}" numpy==1.23.5 "setuptools>=68" wheel
     PIP_R=("${PIP_INDEX[@]}" --no-build-isolation)
