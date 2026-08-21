@@ -22,7 +22,7 @@
 # 可选环境变量：
 #   G1_ROOT   仓根（默认 /root/Beyondminic-Weilai-G1）
 #   CONDA     conda 可执行（默认 conda）
-#   MIRROR    1=用国内镜像(HF_ENDPOINT=hf-mirror + 清华 pip/conda)（默认，适用国内盒）；
+#   MIRROR    1=用国内镜像(HF_ENDPOINT=hf-mirror + 阿里云 pip / 清华 conda)（默认，适用国内盒）；
 #             0=直连（适用海外盒或平台已内置学术加速）
 #   STAGE     all|env|weights|smoke|status（默认 all）。失败后重跑 all 会自动跳过已完成步骤、从断点续；status 只打印进度不干活
 set -euo pipefail
@@ -34,7 +34,7 @@ STAGE="${STAGE:-all}"
 
 # ---- 镜像开关（仅本脚本进程内生效，不写全局 pip config / ~/.condarc）----
 if [ "$MIRROR" = "1" ]; then
-  PIP_INDEX=(-i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn)
+  PIP_INDEX=(-i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com)
   export HF_ENDPOINT=https://hf-mirror.com
   CONDA_MAIN=(-c https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main --override-channels)
   CONDA_FORGE=(-c https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge --override-channels)
