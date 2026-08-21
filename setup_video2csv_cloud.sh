@@ -121,16 +121,19 @@ if [[ "$STAGE" == all || "$STAGE" == env ]]; then
   else
     "$CONDA" env list | awk '{print $1}' | grep -qx gvhmr || "$CONDA" create -y -n gvhmr python=3.10 "${CONDA_MAIN[@]}"
     log "  gvhmr: 装 requirements.txt（torch2.3+cu121 / pytorch3d / pycolmap / smplx）+ pip install -e ."
+    # chumpy 是老 sdist，setup.py 里 `import pip`，PEP517 隔离构建环境没 pip → 先备 numpy/setuptools，-r 关构建隔离
+    "$CONDA" run -n gvhmr pip install "${PIP_INDEX[@]}" numpy==1.23.5 "setuptools>=68" wheel
+    PIP_R=("${PIP_INDEX[@]}" --no-build-isolation)
     # 优先"自己下"（pytorch.org）；装失败再把 torch/torchvision 换成阿里云直链 wheel 重试
     # （阿里云 pytorch-wheels 不是 PEP503 simple index，不能当 --extra-index-url 用，只能直链）
-    if ! "$CONDA" run -n gvhmr --live-stream pip install "${PIP_INDEX[@]}" -r "$G1_ROOT/GVHMR/requirements.txt"; then
+    if ! "$CONDA" run -n gvhmr --live-stream pip install "${PIP_R[@]}" -r "$G1_ROOT/GVHMR/requirements.txt"; then
       log "  ⚠ 自己下失败（多半 download.pytorch.org 不通），torch/torchvision 改阿里云直链 wheel 重试"
       sed -i \
         -e '/^--extra-index-url /d' \
         -e 's#^torch==2.3.0+cu121$#torch @ https://mirrors.aliyun.com/pytorch-wheels/cu121/torch-2.3.0%2Bcu121-cp310-cp310-linux_x86_64.whl#' \
         -e 's#^torchvision==0.18.0+cu121$#torchvision @ https://mirrors.aliyun.com/pytorch-wheels/cu121/torchvision-0.18.0%2Bcu121-cp310-cp310-linux_x86_64.whl#' \
         "$G1_ROOT/GVHMR/requirements.txt"
-      "$CONDA" run -n gvhmr --live-stream pip install "${PIP_INDEX[@]}" -r "$G1_ROOT/GVHMR/requirements.txt"
+      "$CONDA" run -n gvhmr --live-stream pip install "${PIP_R[@]}" -r "$G1_ROOT/GVHMR/requirements.txt"
     fi
     "$CONDA" run -n gvhmr --live-stream pip install "${PIP_INDEX[@]}" -e "$G1_ROOT/GVHMR"
     gvhmr_env_ok || die "gvhmr env 装完仍 import 失败（hmr4d/pytorch3d）"
