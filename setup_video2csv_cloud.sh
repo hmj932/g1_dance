@@ -60,10 +60,7 @@ VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | he
 log "  GPU 显存: ${VRAM_MB} MiB（≥12000 即舒适跑 GVHMR 推理）"
 [ "${VRAM_MB:-0}" -ge 12000 ] || log "  ⚠ 显存 <12G，推理可能 OOM；建议换 24G 卡"
 
-mkdir -p "$G1_ROOT/GVHMR/inputs/checkpoints/body_models/smplx" \
-         "$G1_ROOT/GVHMR/inputs/checkpoints/body_models/smpl" \
-         "$G1_ROOT/GMR/assets/body_models/smplx" \
-         "$G1_ROOT/whole_body_tracking/motions/csv"
+mkdir -p "$G1_ROOT/whole_body_tracking/motions/csv"
 
 # ===== F. 自动补依赖：缺失的 GVHMR/GMR 从 .gitmodules 的 URL shallow clone =====
 # 直接全量 shallow clone（云盒网快+盘大，1.5G 的 GMR ~1-2 分钟；比 sparse 简单且不会漏路径）
@@ -72,13 +69,19 @@ log "F. 检查/拉取 GVHMR + GMR（URL 取自 $G1_ROOT/.gitmodules）"
   git config -f .gitmodules --get-regexp 'submodule\..*\.(path|url)' | \
     awk '{split($1,a,"."); s=a[2]; k=a[3]; if(k=="path")p[s]=$2; if(k=="url")u[s]=$2} END{for(s in p) printf "%s\t%s\n",p[s],u[s]}' | \
     while IFS=$'\t' read -r path url; do
-      [ -e "$path/.git" ] && { log "  skip $path（已存在）"; continue; }
+      if [ -d "$path/.git" ]; then log "  skip $path（已是 git 仓）"; continue; fi
+      if [ -d "$path" ]; then log "  清理残留 $path（非 git 仓，删后重 clone）"; rm -rf "$path"; fi
       log "  clone $path ← $url（--depth 1）"
       git clone --depth 1 "$url" "$path"
     done
 )
 [ -d "$G1_ROOT/GVHMR" ] || die "GVHMR 仍缺失（git 不通？配 http.proxy 后重跑）"
 [ -d "$G1_ROOT/GMR" ]   || die "GMR 仍缺失（git 不通？配 http.proxy 后重跑）"
+
+# body_models 目录在 clone 之后建（clone 前把 GVHMR/GMR 建成非空会导致 git clone 失败）
+mkdir -p "$G1_ROOT/GVHMR/inputs/checkpoints/body_models/smplx" \
+         "$G1_ROOT/GVHMR/inputs/checkpoints/body_models/smpl" \
+         "$G1_ROOT/GMR/assets/body_models/smplx"
 
 # ===== A. conda env（新建 gvhmr / gmr，不碰 base）=====
 if [[ "$STAGE" == all || "$STAGE" == env ]]; then
