@@ -50,7 +50,11 @@ die(){ printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 # ===== 0. 前置检查 =====
 log "0. 前置检查"
 command -v "$CONDA" >/dev/null 2>&1 || die "找不到 conda（CONDA=$CONDA）。盒上一般自带 miniconda。"
-[ -f "$G1_ROOT/.gitmodules" ] || die "G1_ROOT=$G1_ROOT 不像 g1_dance 仓（缺 .gitmodules）。先 rsync/clone g1_dance 上来。"
+# G1_ROOT 自动探测：默认值对不上时，回退到当前目录（在仓内直接 bash 脚本即可）
+if [ ! -f "$G1_ROOT/.gitmodules" ] && [ -f "$PWD/.gitmodules" ]; then
+  G1_ROOT="$PWD"; log "  G1_ROOT 自动设为 $G1_ROOT（取自当前目录）"
+fi
+[ -f "$G1_ROOT/.gitmodules" ] || die "G1_ROOT=$G1_ROOT 不像 g1_dance 仓（缺 .gitmodules）。cd 进仓目录再跑，或 G1_ROOT=<path> bash $0"
 nvidia-smi >/dev/null 2>&1 || die "nvidia-smi 不可用，确认盒上有 GPU"
 VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
 log "  GPU 显存: ${VRAM_MB} MiB（≥12000 即舒适跑 GVHMR 推理）"
