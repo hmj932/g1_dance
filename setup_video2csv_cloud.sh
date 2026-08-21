@@ -120,15 +120,13 @@ if [[ "$STAGE" == all || "$STAGE" == env ]]; then
   if gvhmr_env_ok; then log "  skip gvhmr env（已装好 hmr4d/pytorch3d）"
   else
     "$CONDA" env list | awk '{print $1}' | grep -qx gvhmr || "$CONDA" create -y -n gvhmr python=3.10 "${CONDA_MAIN[@]}"
-    # torch 轮子优先"自己下"（pytorch.org）；只有盒上真到不了才回退阿里云镜像（同官方 wheel）
-    TORCH_WHL_URL="https://download.pytorch.org/whl/cu121/torch-2.3.0%2Bcu121-cp310-cp310-linux_x86_64.whl"
-    if ! grep -q 'mirrors.aliyun.com/pytorch-wheels' "$G1_ROOT/GVHMR/requirements.txt" \
-       && ! curl -sIL -o /dev/null --connect-timeout 4 --max-time 8 "$TORCH_WHL_URL" 2>/dev/null; then
-      log "  ⚠ download.pytorch.org 不通（torch 轮子取不到），改走阿里云镜像（同官方 wheel）"
-      sed -i 's#https://download.pytorch.org/whl/cu121#https://mirrors.aliyun.com/pytorch-wheels/cu121/#' "$G1_ROOT/GVHMR/requirements.txt"
-    fi
     log "  gvhmr: 装 requirements.txt（torch2.3+cu121 / pytorch3d / pycolmap / smplx）+ pip install -e ."
-    "$CONDA" run -n gvhmr --live-stream pip install "${PIP_INDEX[@]}" -r "$G1_ROOT/GVHMR/requirements.txt"
+    # 优先"自己下"（pytorch.org）；装失败再切阿里云镜像重试（同官方 wheel，国内稳）
+    if ! "$CONDA" run -n gvhmr --live-stream pip install "${PIP_INDEX[@]}" -r "$G1_ROOT/GVHMR/requirements.txt"; then
+      log "  ⚠ 自己下失败（多半 download.pytorch.org 不通），切阿里云镜像重试 torch"
+      sed -i 's#https://download.pytorch.org/whl/cu121#https://mirrors.aliyun.com/pytorch-wheels/cu121/#' "$G1_ROOT/GVHMR/requirements.txt"
+      "$CONDA" run -n gvhmr --live-stream pip install "${PIP_INDEX[@]}" -r "$G1_ROOT/GVHMR/requirements.txt"
+    fi
     "$CONDA" run -n gvhmr --live-stream pip install "${PIP_INDEX[@]}" -e "$G1_ROOT/GVHMR"
     gvhmr_env_ok || die "gvhmr env 装完仍 import 失败（hmr4d/pytorch3d）"
   fi
