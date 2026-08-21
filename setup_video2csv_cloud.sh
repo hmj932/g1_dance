@@ -24,7 +24,7 @@
 #   CONDA     conda 可执行（默认 conda）
 #   MIRROR    1=用国内镜像(HF_ENDPOINT=hf-mirror + 清华 pip/conda)（默认，适用国内盒）；
 #             0=直连（适用海外盒或平台已内置学术加速）
-#   STAGE     all|env|weights|smoke（默认 all）；可分段跑
+#   STAGE     all|env|weights|smoke|status（默认 all）。失败后重跑 all 会自动跳过已完成步骤、从断点续；status 只打印进度不干活
 set -euo pipefail
 
 G1_ROOT="${G1_ROOT:-/root/Beyondminic-Weilai-G1}"
@@ -47,6 +47,33 @@ fi
 log(){ printf '\n\033[1;34m▶ %s\033[0m\n' "$*"; }
 die(){ printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
+# ---- 完成度探测（断点续跑：重跑 STAGE=all 时跳过已完成、从第一个未完成处续）----
+gvhmr_env_ok(){ "$CONDA" env list 2>/dev/null | awk '{print $1}' | grep -qx gvhmr \
+  && "$CONDA" run -n gvhmr python -c "import hmr4d,pytorch3d" >/dev/null 2>&1; }
+gmr_env_ok(){ "$CONDA" env list 2>/dev/null | awk '{print $1}' | grep -qx gmr \
+  && "$CONDA" run -n gmr python -c "import general_motion_retargeting,mujoco,mink" >/dev/null 2>&1; }
+weights_ok(){ local f; for f in gvhmr/gvhmr_siga24_release.ckpt hmr2/epoch=10-step=25000.ckpt \
+             vitpose/vitpose-h-multi-coco.pth yolo/yolov8x.pt; do
+    [ -f "$G1_ROOT/GVHMR/inputs/checkpoints/$f" ] || return 1; done; }
+smpl_ok(){ [ -f "$G1_ROOT/GVHMR/inputs/checkpoints/body_models/smplx/SMPLX_NEUTRAL.npz" ] \
+        && [ -f "$G1_ROOT/GMR/assets/body_models/smplx/SMPLX_NEUTRAL.pkl" ]; }
+pt_ok(){ [ -f "$G1_ROOT/GVHMR/outputs/demo/tennis/hmr4d_results.pt" ] \
+       || [ -n "$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path '*tennis*' 2>/dev/null | head -1)" ]; }
+csv_ok(){ [ -f "$G1_ROOT/whole_body_tracking/motions/csv/tennis.csv" ]; }
+# 用法：rep "标签" <判定命令>
+rep(){ local lbl="$1"; shift; if "$@" >/dev/null 2>&1; then printf "  \033[32m✓\033[0m %s\n" "$lbl"; else printf "  \033[31m✗\033[0m %s\n" "$lbl"; fi; }
+progress_report(){
+  log "进度检查（断点续跑依据）"
+  rep "F  依赖 GVHMR 仓"        test -d "$G1_ROOT/GVHMR/.git"
+  rep "F  依赖 GMR 仓"          test -d "$G1_ROOT/GMR/.git"
+  rep "A  env gvhmr(hmr4d/pytorch3d)" gvhmr_env_ok
+  rep "A  env gmr(retarget/mujoco/mink)" gmr_env_ok
+  rep "B  GVHMR 权重×4"          weights_ok
+  rep "C  SMPL neutral(npz+pkl)" smpl_ok
+  rep "D  smoke .pt(tennis)"     pt_ok
+  rep "D  smoke csv(tennis)"     csv_ok
+}
+
 # ===== 0. 前置检查 =====
 log "0. 前置检查"
 command -v "$CONDA" >/dev/null 2>&1 || die "找不到 conda（CONDA=$CONDA）。盒上一般自带 miniconda。"
@@ -59,6 +86,9 @@ nvidia-smi >/dev/null 2>&1 || die "nvidia-smi 不可用，确认盒上有 GPU"
 VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
 log "  GPU 显存: ${VRAM_MB} MiB（≥12000 即舒适跑 GVHMR 推理）"
 [ "${VRAM_MB:-0}" -ge 12000 ] || log "  ⚠ 显存 <12G，推理可能 OOM；建议换 24G 卡"
+
+progress_report
+if [ "$STAGE" = status ]; then log "STAGE=status，仅检查不干活，退出。"; exit 0; fi
 
 mkdir -p "$G1_ROOT/whole_body_tracking/motions/csv"
 
@@ -87,35 +117,42 @@ mkdir -p "$G1_ROOT/GVHMR/inputs/checkpoints/body_models/smplx" \
 if [[ "$STAGE" == all || "$STAGE" == env ]]; then
   log "A. 建新 conda env：gvhmr + gmr（py3.10）"
 
-  if ! "$CONDA" env list | awk '{print $1}' | grep -qx gvhmr; then
-    "$CONDA" create -y -n gvhmr python=3.10 "${CONDA_MAIN[@]}"
+  if gvhmr_env_ok; then log "  skip gvhmr env（已装好 hmr4d/pytorch3d）"
+  else
+    "$CONDA" env list | awk '{print $1}' | grep -qx gvhmr || "$CONDA" create -y -n gvhmr python=3.10 "${CONDA_MAIN[@]}"
+    log "  gvhmr: 装 requirements.txt（torch2.3+cu121 / pytorch3d / pycolmap / smplx）+ pip install -e ."
+    "$CONDA" run -n gvhmr --live-stream pip install "${PIP_INDEX[@]}" -r "$G1_ROOT/GVHMR/requirements.txt"
+    "$CONDA" run -n gvhmr --live-stream pip install "${PIP_INDEX[@]}" -e "$G1_ROOT/GVHMR"
+    gvhmr_env_ok || die "gvhmr env 装完仍 import 失败（hmr4d/pytorch3d）"
   fi
-  log "  gvhmr: 装 requirements.txt（torch2.3+cu121 / pytorch3d / pycolmap / smplx）+ pip install -e ."
-  "$CONDA" run -n gvhmr --live-stream pip install "${PIP_INDEX[@]}" -r "$G1_ROOT/GVHMR/requirements.txt"
-  "$CONDA" run -n gvhmr --live-stream pip install "${PIP_INDEX[@]}" -e "$G1_ROOT/GVHMR"
 
-  if ! "$CONDA" env list | awk '{print $1}' | grep -qx gmr; then
-    "$CONDA" create -y -n gmr python=3.10 "${CONDA_MAIN[@]}"
+  if gmr_env_ok; then log "  skip gmr env（已装好 retarget/mujoco/mink）"
+  else
+    "$CONDA" env list | awk '{print $1}' | grep -qx gmr || "$CONDA" create -y -n gmr python=3.10 "${CONDA_MAIN[@]}"
+    log "  gmr: pip install -e GMR（含 smplx@git+github，需 github 可达）+ mujoco + mink"
+    "$CONDA" run -n gmr --live-stream pip install "${PIP_INDEX[@]}" -e "$G1_ROOT/GMR"
+    "$CONDA" run -n gmr --live-stream pip install "${PIP_INDEX[@]}" mujoco mink
+    "$CONDA" install -y -n gmr libstdcxx-ng "${CONDA_FORGE[@]}"
+    gmr_env_ok || die "gmr env 装完仍 import 失败（retarget/mujoco/mink）"
   fi
-  log "  gmr: pip install -e GMR（含 smplx@git+github，需 github 可达）+ mujoco + mink"
-  "$CONDA" run -n gmr --live-stream pip install "${PIP_INDEX[@]}" -e "$G1_ROOT/GMR"
-  "$CONDA" run -n gmr --live-stream pip install "${PIP_INDEX[@]}" mujoco mink
-  "$CONDA" install -y -n gmr libstdcxx-ng "${CONDA_FORGE[@]}"
 fi
 
 # ===== B. GVHMR 权重（5.56G，HF 镜像 ryanrudes/gvhmr）=====
 if [[ "$STAGE" == all || "$STAGE" == weights ]]; then
   log "B. 下 GVHMR 推理权重 → $G1_ROOT/GVHMR/inputs/checkpoints"
-  "$CONDA" run -n gvhmr pip install "${PIP_INDEX[@]}" -U "huggingface_hub>=0.20"
-  # ryanrudes/gvhmr 只含 4 个推理文件（gvhmr/hmr2/vitpose/yolo），无训练数据，子目录已对齐 INSTALL.md
-  "$CONDA" run -n gvhmr huggingface-cli download ryanrudes/gvhmr \
-    --local-dir "$G1_ROOT/GVHMR/inputs/checkpoints"
-  log "  权重落位："
-  for f in gvhmr/gvhmr_siga24_release.ckpt hmr2/epoch=10-step=25000.ckpt \
-           vitpose/vitpose-h-multi-coco.pth yolo/yolov8x.pt; do
-    p="$G1_ROOT/GVHMR/inputs/checkpoints/$f"
-    [ -f "$p" ] && log "    ✓ $f ($(du -h "$p" | cut -f1))" || die "    ✗ 缺 $f"
-  done
+  if weights_ok; then log "  skip（4 个权重已就位）"
+  else
+    "$CONDA" run -n gvhmr pip install "${PIP_INDEX[@]}" -U "huggingface_hub>=0.20"
+    # ryanrudes/gvhmr 只含 4 个推理文件（gvhmr/hmr2/vitpose/yolo），无训练数据，子目录已对齐 INSTALL.md
+    "$CONDA" run -n gvhmr huggingface-cli download ryanrudes/gvhmr \
+      --local-dir "$G1_ROOT/GVHMR/inputs/checkpoints"
+    log "  权重落位："
+    for f in gvhmr/gvhmr_siga24_release.ckpt hmr2/epoch=10-step=25000.ckpt \
+             vitpose/vitpose-h-multi-coco.pth yolo/yolov8x.pt; do
+      p="$G1_ROOT/GVHMR/inputs/checkpoints/$f"
+      [ -f "$p" ] && log "    ✓ $f ($(du -h "$p" | cut -f1))" || die "    ✗ 缺 $f"
+    done
+  fi
 fi
 
 # ===== C. SMPL 落位检查（许可门控，必须你手动下）=====
@@ -146,29 +183,33 @@ fi
 # ===== D. smoke：tennis.mp4 -s → .pt → .csv（跳 render）=====
 if [[ "$STAGE" == all || "$STAGE" == smoke ]]; then
   log "D. smoke test：video → .pt → .csv"
-
-  DEMO="$G1_ROOT/GVHMR/tools/demo/demo.py"
-  # patch 掉无条件 render（demo.py L330-331），幂等
-  if ! grep -q 'SKIP_RENDER' "$DEMO"; then
-    sed -i 's/^    render_incam(cfg)$/    pass  # SKIP_RENDER render_incam(cfg)/' "$DEMO"
-    sed -i 's/^    render_global(cfg)$/    pass  # SKIP_RENDER render_global(cfg)/' "$DEMO"
-    log "  已 patch demo.py 跳过 render（恢复：sed -i '/SKIP_RENDER/s/pass  # //' \"$DEMO\"）"
-  fi
-
-  log "  [1/2] GVHMR 推理（gvhmr env，-s 静止机位）"
-  ( cd "$G1_ROOT/GVHMR" && \
-    "$CONDA" run -n gvhmr --live-stream python tools/demo/demo.py \
-      --video=docs/example_video/tennis.mp4 -s )
-
   PT="$G1_ROOT/GVHMR/outputs/demo/tennis/hmr4d_results.pt"
   [ -f "$PT" ] || PT=$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path '*tennis*' 2>/dev/null | head -1)
-  [ -n "$PT" ] && [ -f "$PT" ] || die "没生成 hmr4d_results.pt"
-  log "  ✓ .pt: $PT ($(du -h "$PT" | cut -f1))"
 
-  log "  [2/2] gvhmr_to_csv（gmr env，SMPL-X→G1 IK retarget）"
-  "$CONDA" run -n gmr --live-stream python "$G1_ROOT/whole_body_tracking/scripts/gvhmr_to_csv.py" \
-    --gvhmr_pred_file "$PT" \
-    --output_file "$G1_ROOT/whole_body_tracking/motions/csv/tennis.csv"
+  if [[ "$STAGE" == all ]] && csv_ok && [ -n "$PT" ] && [ -f "$PT" ]; then
+    log "  skip（tennis .pt + csv 都在，smoke 已完成；STAGE=smoke 可强制重跑）"
+  else
+    DEMO="$G1_ROOT/GVHMR/tools/demo/demo.py"
+    # patch 掉无条件 render（demo.py L330-331），幂等
+    if ! grep -q 'SKIP_RENDER' "$DEMO"; then
+      sed -i 's/^    render_incam(cfg)$/    pass  # SKIP_RENDER render_incam(cfg)/' "$DEMO"
+      sed -i 's/^    render_global(cfg)$/    pass  # SKIP_RENDER render_global(cfg)/' "$DEMO"
+      log "  已 patch demo.py 跳过 render（恢复：sed -i '/SKIP_RENDER/s/pass  # //' \"$DEMO\"）"
+    fi
+    log "  [1/2] GVHMR 推理（gvhmr env，-s 静止机位）"
+    ( cd "$G1_ROOT/GVHMR" && \
+      "$CONDA" run -n gvhmr --live-stream python tools/demo/demo.py \
+        --video=docs/example_video/tennis.mp4 -s )
+    [ -f "$PT" ] || PT="$G1_ROOT/GVHMR/outputs/demo/tennis/hmr4d_results.pt"
+    [ -f "$PT" ] || PT=$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path '*tennis*' 2>/dev/null | head -1)
+    [ -n "$PT" ] && [ -f "$PT" ] || die "没生成 hmr4d_results.pt"
+    log "  ✓ .pt: $PT ($(du -h "$PT" | cut -f1))"
+    log "  [2/2] gvhmr_to_csv（gmr env，SMPL-X→G1 IK retarget）"
+    "$CONDA" run -n gmr --live-stream python "$G1_ROOT/whole_body_tracking/scripts/gvhmr_to_csv.py" \
+      --gvhmr_pred_file "$PT" \
+      --output_file "$G1_ROOT/whole_body_tracking/motions/csv/tennis.csv"
+  fi
+
   CSV="$G1_ROOT/whole_body_tracking/motions/csv/tennis.csv"
   [ -f "$CSV" ] || die "没生成 tennis.csv"
   log "  ✓ CSV: $CSV"
