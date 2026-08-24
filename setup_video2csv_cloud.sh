@@ -214,12 +214,11 @@ if [[ "$STAGE" == all || "$STAGE" == smoke ]]; then
     log "  skip（tennis .pt + csv 都在，smoke 已完成；STAGE=smoke 可强制重跑）"
   else
     DEMO="$G1_ROOT/GVHMR/tools/demo/demo.py"
-    # patch 掉无条件 render（demo.py L330-331），幂等
-    if ! grep -q 'SKIP_RENDER' "$DEMO"; then
-      sed -i 's/^    render_incam(cfg)$/    pass  # SKIP_RENDER render_incam(cfg)/' "$DEMO"
-      sed -i 's/^    render_global(cfg)$/    pass  # SKIP_RENDER render_global(cfg)/' "$DEMO"
-      log "  已 patch demo.py 跳过 render（恢复：sed -i '/SKIP_RENDER/s/pass  # //' \"$DEMO\"）"
-    fi
+    # patch 掉 render + merge（render 跳过后 incam/global 视频不存在→merge 必挂；且 ffmpeg 可能没装）。幂等。
+    sed -i 's/^    render_incam(cfg)$/    pass  # SKIP_RENDER render_incam(cfg)/' "$DEMO"
+    sed -i 's/^    render_global(cfg)$/    pass  # SKIP_RENDER render_global(cfg)/' "$DEMO"
+    sed -i 's/^        merge_videos_horizontal(.*/        pass  # SKIP_RENDER merge_videos_horizontal/' "$DEMO"
+    grep -q 'SKIP_RENDER' "$DEMO" && log "  已 patch demo.py 跳过 render + merge（恢复：sed -i '/SKIP_RENDER/s/pass  # //' \"$DEMO\"）"
     log "  [1/2] GVHMR 推理（gvhmr env，-s 静止机位）"
     ( cd "$G1_ROOT/GVHMR" && \
       "$CONDA" run -n gvhmr --live-stream python tools/demo/demo.py \
