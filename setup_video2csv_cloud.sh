@@ -57,6 +57,7 @@ weights_ok(){ local f; for f in gvhmr/gvhmr_siga24_release.ckpt hmr2/epoch=10-st
              vitpose/vitpose-h-multi-coco.pth yolo/yolov8x.pt; do
     [ -f "$G1_ROOT/GVHMR/inputs/checkpoints/$f" ] || return 1; done; }
 smpl_ok(){ [ -f "$G1_ROOT/GVHMR/inputs/checkpoints/body_models/smplx/SMPLX_NEUTRAL.npz" ] \
+        && [ -f "$G1_ROOT/GMR/assets/body_models/smplx/SMPLX_NEUTRAL.npz" ] \
         && [ -f "$G1_ROOT/GMR/assets/body_models/smplx/SMPLX_NEUTRAL.pkl" ]; }
 pt_ok(){ [ -f "$G1_ROOT/GVHMR/outputs/demo/tennis/hmr4d_results.pt" ] \
        || [ -n "$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path '*tennis*' 2>/dev/null | head -1)" ]; }
@@ -180,26 +181,26 @@ EOF
 fi
 
 # ===== C. SMPL 落位检查（许可门控，必须你手动下）=====
+# SMPLX neutral .npz 要放两处：GVHMR 推理 + GMR 的 gvhmr_to_csv(smplx.create)；.pkl 一处(GMR L119 检查)
 SMPLX_NPZ="$G1_ROOT/GVHMR/inputs/checkpoints/body_models/smplx/SMPLX_NEUTRAL.npz"
+SMPLX_NPZ_GMR="$G1_ROOT/GMR/assets/body_models/smplx/SMPLX_NEUTRAL.npz"
 SMPLX_PKL="$G1_ROOT/GMR/assets/body_models/smplx/SMPLX_NEUTRAL.pkl"
 SMPL_PKL="$G1_ROOT/GVHMR/inputs/checkpoints/body_models/smpl/SMPL_NEUTRAL.pkl"
 log "C. SMPL 检查（这步只能你手动注册下，AI 替不了）"
 miss=0
-[ -f "$SMPLX_NPZ" ] && log "  ✓ SMPLX_NEUTRAL.npz" || { log "  ✗ SMPLX_NEUTRAL.npz（GVHMR 推理要）"; miss=1; }
-[ -f "$SMPLX_PKL" ] && log "  ✓ SMPLX_NEUTRAL.pkl" || { log "  ✗ SMPLX_NEUTRAL.pkl（gvhmr_to_csv L119 要）"; miss=1; }
+[ -f "$SMPLX_NPZ" ] && log "  ✓ SMPLX_NEUTRAL.npz (GVHMR)" || { log "  ✗ SMPLX_NEUTRAL.npz（GVHMR 推理要）→ $SMPLX_NPZ"; miss=1; }
+[ -f "$SMPLX_NPZ_GMR" ] && log "  ✓ SMPLX_NEUTRAL.npz (GMR)" || { log "  ✗ SMPLX_NEUTRAL.npz（gvhmr_to_csv 的 smplx.create 要）→ $SMPLX_NPZ_GMR（同一个 .npz 复制到 GMR 这边）"; miss=1; }
+[ -f "$SMPLX_PKL" ] && log "  ✓ SMPLX_NEUTRAL.pkl (GMR)" || { log "  ✗ SMPLX_NEUTRAL.pkl（gvhmr_to_csv L119 检查）→ $SMPLX_PKL"; miss=1; }
 [ -f "$SMPL_PKL" ]  && log "  ✓ SMPL_NEUTRAL.pkl（仅 render 要，已跳过 render → 可暂缓）" || log "  ⚠ SMPL_NEUTRAL.pkl 缺（render 已跳过，不影响出 .pt/csv）"
 if [ "$miss" = "1" ]; then
   cat <<EOF
 
-  ── 你需要手动做的（一次性）──
-  1. 注册 https://smpl-x.is.tue.mpg.de （同意 license，免费、非商业研究用）
-     下载 models_smplx_v1_1.zip，取其中：
-       SMPLX_NEUTRAL.npz → 放 $SMPLX_NPZ
-       SMPLX_NEUTRAL.pkl → 放 $SMPLX_PKL
-  2. 注册 https://smpl.is.tue.mpg.de 下载 SMPL_python_v.1.1.0.zip，取：
-       SMPL_NEUTRAL.pkl  → 放 $SMPL_PKL  （跳过 render 可暂缓）
-  ── 只下 neutral，别下整包带纹理全性别版 ──
-  放好后重跑：STAGE=smoke G1_ROOT=$G1_ROOT bash $0
+  ── 缺 SMPL。SMPLX neutral 的 .npz 要放两处、.pkl 一处 ──
+    $SMPLX_NPZ          （GVHMR 推理）
+    $SMPLX_NPZ_GMR      （gvhmr_to_csv 的 smplx.create，同一个 .npz 复制到 GMR 这边）
+    $SMPLX_PKL          （gvhmr_to_csv L119 检查）
+  SMPL neutral（仅 render，已跳过→可暂缓）：$SMPL_PKL
+  ── 放好后重跑：bash $0 ──
 EOF
   exit 0
 fi
