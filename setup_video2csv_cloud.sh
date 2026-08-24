@@ -208,7 +208,7 @@ fi
 if [[ "$STAGE" == all || "$STAGE" == smoke ]]; then
   log "D. smoke test：video → .pt → .csv"
   PT="$G1_ROOT/GVHMR/outputs/demo/tennis/hmr4d_results.pt"
-  [ -f "$PT" ] || PT=$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path '*tennis*' 2>/dev/null | head -1)
+  [ -f "$PT" ] || PT=$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path '*tennis*' 2>/dev/null | head -1 || true)
 
   if [[ "$STAGE" == all ]] && csv_ok && [ -n "$PT" ] && [ -f "$PT" ]; then
     log "  skip（tennis .pt + csv 都在，smoke 已完成；STAGE=smoke 可强制重跑）"
@@ -225,7 +225,7 @@ if [[ "$STAGE" == all || "$STAGE" == smoke ]]; then
       "$CONDA" run -n gvhmr --live-stream python tools/demo/demo.py \
         --video=docs/example_video/tennis.mp4 -s )
     [ -f "$PT" ] || PT="$G1_ROOT/GVHMR/outputs/demo/tennis/hmr4d_results.pt"
-    [ -f "$PT" ] || PT=$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path '*tennis*' 2>/dev/null | head -1)
+    [ -f "$PT" ] || PT=$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path '*tennis*' 2>/dev/null | head -1 || true)
     [ -n "$PT" ] && [ -f "$PT" ] || die "没生成 hmr4d_results.pt"
     log "  ✓ .pt: $PT ($(du -h "$PT" | cut -f1))"
     log "  [2/2] gvhmr_to_csv（gmr env，SMPL-X→G1 IK retarget）"
