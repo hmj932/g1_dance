@@ -229,11 +229,14 @@ if [[ "$STAGE" == all || "$STAGE" == smoke ]]; then
     [ -n "$PT" ] && [ -f "$PT" ] || die "没生成 hmr4d_results.pt"
     log "  ✓ .pt: $PT ($(du -h "$PT" | cut -f1))"
     log "  [2/2] gvhmr_to_csv（gmr env，SMPL-X→G1 IK retarget）"
-    # patch GMR: mink.solve_ik 默认 safety_break=True，IK 浮点抖动刚超 joint limit（如 ankle_roll 0.2618018 > 0.2618）就 raise；加 safety_break=False 让它 clamp
+    # patch GMR bug: mink.solve_ik 签名 (conf,tasks,dt,solver,damping, safety_break=False, limits=None,...)
+    # GMR 调用 ...damping, self.ik_limits) 把 ik_limits 当第6位置参→落 safety_break(列表 truthy→超限 raise)，limits 反而空。
+    # 修：末参 self.ik_limits → limits=self.ik_limits（keyword），safety_break 留默认 False（clamp 不 raise）。
     GMR_MR="$G1_ROOT/GMR/general_motion_retargeting/motion_retarget.py"
-    if ! grep -q 'safety_break=False' "$GMR_MR" 2>/dev/null; then
-      sed -i 's/self\.ik_limits$/&, safety_break=False/' "$GMR_MR"
-      log "  已 patch GMR motion_retarget.py: mink.solve_ik + safety_break=False（防 IK 浮点超限 raise）"
+    if ! grep -q 'limits=self.ik_limits' "$GMR_MR" 2>/dev/null; then
+      sed -i 's/, safety_break=False//' "$GMR_MR"   # 撤掉之前误加的（若有）
+      sed -i 's/self\.ik_limits$/limits=self.ik_limits/' "$GMR_MR"
+      log "  已 patch GMR motion_retarget.py: ik_limits→limits=（原被传成 safety_break→超限 raise）"
     fi
     "$CONDA" run -n gmr --live-stream python "$G1_ROOT/whole_body_tracking/scripts/gvhmr_to_csv.py" \
       --gvhmr_pred_file "$PT" \
