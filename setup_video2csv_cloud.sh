@@ -229,6 +229,12 @@ if [[ "$STAGE" == all || "$STAGE" == smoke ]]; then
     [ -n "$PT" ] && [ -f "$PT" ] || die "没生成 hmr4d_results.pt"
     log "  ✓ .pt: $PT ($(du -h "$PT" | cut -f1))"
     log "  [2/2] gvhmr_to_csv（gmr env，SMPL-X→G1 IK retarget）"
+    # patch GMR: mink.solve_ik 默认 safety_break=True，IK 浮点抖动刚超 joint limit（如 ankle_roll 0.2618018 > 0.2618）就 raise；加 safety_break=False 让它 clamp
+    GMR_MR="$G1_ROOT/GMR/general_motion_retargeting/motion_retarget.py"
+    if ! grep -q 'safety_break=False' "$GMR_MR" 2>/dev/null; then
+      sed -i 's/self\.ik_limits$/&, safety_break=False/' "$GMR_MR"
+      log "  已 patch GMR motion_retarget.py: mink.solve_ik + safety_break=False（防 IK 浮点超限 raise）"
+    fi
     "$CONDA" run -n gmr --live-stream python "$G1_ROOT/whole_body_tracking/scripts/gvhmr_to_csv.py" \
       --gvhmr_pred_file "$PT" \
       --output_file "$G1_ROOT/whole_body_tracking/motions/csv/tennis.csv"
