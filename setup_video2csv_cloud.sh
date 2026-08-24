@@ -163,8 +163,9 @@ if [[ "$STAGE" == all || "$STAGE" == weights ]]; then
   else
     "$CONDA" run -n gvhmr pip install "${PIP_INDEX[@]}" -U "huggingface_hub>=0.20"
     # ryanrudes/gvhmr 只含 4 个推理文件（gvhmr/hmr2/vitpose/yolo），无训练数据，子目录已对齐 INSTALL.md
-    "$CONDA" run -n gvhmr huggingface-cli download ryanrudes/gvhmr \
-      --local-dir "$G1_ROOT/GVHMR/inputs/checkpoints"
+    # huggingface_hub≥1.0 弃用了 huggingface-cli（只打印提示不下载），改用 hf；旧版回退 huggingface-cli
+    "$CONDA" run -n gvhmr hf download ryanrudes/gvhmr --local-dir "$G1_ROOT/GVHMR/inputs/checkpoints" \
+      || "$CONDA" run -n gvhmr huggingface-cli download ryanrudes/gvhmr --local-dir "$G1_ROOT/GVHMR/inputs/checkpoints"
     log "  权重落位："
     for f in gvhmr/gvhmr_siga24_release.ckpt hmr2/epoch=10-step=25000.ckpt \
              vitpose/vitpose-h-multi-coco.pth yolo/yolov8x.pt; do
