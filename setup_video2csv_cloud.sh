@@ -161,20 +161,12 @@ if [[ "$STAGE" == all || "$STAGE" == env ]]; then
   fi
 fi
 
-# ===== B. GVHMR 权重（4 个；盒子 hf 不通就提醒你手动放）=====
+# ===== B. GVHMR 权重（4 个；盒子 hf 不通，只检查+提醒，不试下载）=====
 if [[ "$STAGE" == all || "$STAGE" == weights ]]; then
   log "B. GVHMR 推理权重 → $G1_ROOT/GVHMR/inputs/checkpoints"
   if weights_ok; then log "  skip（4 个权重已就位）"
   else
-    # 试 hf download（能通就下；盒子到不了 hf-mirror 会快速失败，之后提醒你手动放）
-    "$CONDA" run -n gvhmr pip install "${PIP_INDEX[@]}" -U "huggingface_hub>=0.20" 2>/dev/null || true
-    if [ "$MIRROR" = "1" ]; then HFENV=(env HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1); else HFENV=(env HF_HUB_DISABLE_XET=1); fi
-    log "  试 hf download（hf-mirror，禁 xet）… 不通就提醒你手动放"
-    "$CONDA" run -n gvhmr --live-stream "${HFENV[@]}" hf download ryanrudes/gvhmr --local-dir "$G1_ROOT/GVHMR/inputs/checkpoints" 2>&1 \
-      || log "  ⚠ hf download 失败（盒子到不了 hf-mirror）"
-    if weights_ok; then log "  ✓ 权重就位"
-    else
-      cat <<EOF
+    cat <<EOF
 
   ── 缺权重。你直接复制到这些路径，放好重跑 ──
     $G1_ROOT/GVHMR/inputs/checkpoints/gvhmr/gvhmr_siga24_release.ckpt   (163MB)
@@ -183,8 +175,7 @@ if [[ "$STAGE" == all || "$STAGE" == weights ]]; then
     $G1_ROOT/GVHMR/inputs/checkpoints/yolo/yolov8x.pt                      (137MB)
   ── 放好后重跑：bash $0 ──
 EOF
-      exit 0
-    fi
+    exit 0
   fi
 fi
 
