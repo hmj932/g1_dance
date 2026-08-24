@@ -165,8 +165,10 @@ if [[ "$STAGE" == all || "$STAGE" == weights ]]; then
     # ryanrudes/gvhmr 只含 4 个推理文件（gvhmr/hmr2/vitpose/yolo），无训练数据，子目录已对齐 INSTALL.md
     # huggingface_hub≥1.0 弃用了 huggingface-cli（只打印提示不下载），改用 hf；旧版回退 huggingface-cli
     # --live-stream 让 tqdm 进度条实时显示（否则 conda run 缓冲输出，看着像卡住）
-    "$CONDA" run -n gvhmr --live-stream hf download ryanrudes/gvhmr --local-dir "$G1_ROOT/GVHMR/inputs/checkpoints" \
-      || "$CONDA" run -n gvhmr --live-stream huggingface-cli download ryanrudes/gvhmr --local-dir "$G1_ROOT/GVHMR/inputs/checkpoints"
+    # 用 env 显式把 HF_ENDPOINT 塞给 hf 子进程（conda run 有时不传 export 的 env；国内盒走 hf-mirror，盒子直连可达）
+    if [ "$MIRROR" = "1" ]; then HFENV=(env HF_ENDPOINT=https://hf-mirror.com); else HFENV=(env); fi
+    "$CONDA" run -n gvhmr --live-stream "${HFENV[@]}" hf download ryanrudes/gvhmr --local-dir "$G1_ROOT/GVHMR/inputs/checkpoints" \
+      || "$CONDA" run -n gvhmr --live-stream "${HFENV[@]}" huggingface-cli download ryanrudes/gvhmr --local-dir "$G1_ROOT/GVHMR/inputs/checkpoints"
     log "  权重落位："
     for f in gvhmr/gvhmr_siga24_release.ckpt hmr2/epoch=10-step=25000.ckpt \
              vitpose/vitpose-h-multi-coco.pth yolo/yolov8x.pt; do
