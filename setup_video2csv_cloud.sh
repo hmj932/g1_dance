@@ -31,6 +31,7 @@ G1_ROOT="${G1_ROOT:-/root/Beyondminic-Weilai-G1}"
 CONDA="${CONDA:-conda}"
 MIRROR="${MIRROR:-1}"
 STAGE="${STAGE:-all}"
+STAGING="${STAGING:-/home/Downloads}"   # 你上传权重/SMPL 的目录；盒子 hf 不通时从这里 cp 兜底
 
 # ---- 镜像开关（仅本脚本进程内生效，不写全局 pip config / ~/.condarc）----
 if [ "$MIRROR" = "1" ]; then
@@ -108,8 +109,12 @@ log "F. 检查/拉取 GVHMR + GMR（URL 取自 $G1_ROOT/.gitmodules）"
 [ -d "$G1_ROOT/GVHMR" ] || die "GVHMR 仍缺失（git 不通？配 http.proxy 后重跑）"
 [ -d "$G1_ROOT/GMR" ]   || die "GMR 仍缺失（git 不通？配 http.proxy 后重跑）"
 
-# body_models 目录在 clone 之后建（clone 前把 GVHMR/GMR 建成非空会导致 git clone 失败）
-mkdir -p "$G1_ROOT/GVHMR/inputs/checkpoints/body_models/smplx" \
+# 目标目录在 clone 之后建（clone 前把 GVHMR/GMR 建成非空会导致 git clone 失败）
+mkdir -p "$G1_ROOT/GVHMR/inputs/checkpoints/gvhmr" \
+         "$G1_ROOT/GVHMR/inputs/checkpoints/hmr2" \
+         "$G1_ROOT/GVHMR/inputs/checkpoints/vitpose" \
+         "$G1_ROOT/GVHMR/inputs/checkpoints/yolo" \
+         "$G1_ROOT/GVHMR/inputs/checkpoints/body_models/smplx" \
          "$G1_ROOT/GVHMR/inputs/checkpoints/body_models/smpl" \
          "$G1_ROOT/GMR/assets/body_models/smplx"
 
@@ -156,25 +161,30 @@ if [[ "$STAGE" == all || "$STAGE" == env ]]; then
   fi
 fi
 
-# ===== B. GVHMR 权重（5.56G，HF 镜像 ryanrudes/gvhmr）=====
+# ===== B. GVHMR 权重（4 个；盒子 hf 不通就提醒你手动放）=====
 if [[ "$STAGE" == all || "$STAGE" == weights ]]; then
-  log "B. 下 GVHMR 推理权重 → $G1_ROOT/GVHMR/inputs/checkpoints"
+  log "B. GVHMR 推理权重 → $G1_ROOT/GVHMR/inputs/checkpoints"
   if weights_ok; then log "  skip（4 个权重已就位）"
   else
-    "$CONDA" run -n gvhmr pip install "${PIP_INDEX[@]}" -U "huggingface_hub>=0.20"
-    # ryanrudes/gvhmr 只含 4 个推理文件（gvhmr/hmr2/vitpose/yolo），无训练数据，子目录已对齐 INSTALL.md
-    # huggingface_hub≥1.0 弃用了 huggingface-cli（只打印提示不下载），改用 hf；旧版回退 huggingface-cli
-    # --live-stream 让 tqdm 进度条实时显示（否则 conda run 缓冲输出，看着像卡住）
-    # 用 env 显式把 HF_ENDPOINT 塞给 hf 子进程（conda run 有时不传 export 的 env；国内盒走 hf-mirror，盒子直连可达）
-    if [ "$MIRROR" = "1" ]; then HFENV=(env HF_ENDPOINT=https://hf-mirror.com); else HFENV=(env); fi
-    "$CONDA" run -n gvhmr --live-stream "${HFENV[@]}" hf download ryanrudes/gvhmr --local-dir "$G1_ROOT/GVHMR/inputs/checkpoints" \
-      || "$CONDA" run -n gvhmr --live-stream "${HFENV[@]}" huggingface-cli download ryanrudes/gvhmr --local-dir "$G1_ROOT/GVHMR/inputs/checkpoints"
-    log "  权重落位："
-    for f in gvhmr/gvhmr_siga24_release.ckpt hmr2/epoch=10-step=25000.ckpt \
-             vitpose/vitpose-h-multi-coco.pth yolo/yolov8x.pt; do
-      p="$G1_ROOT/GVHMR/inputs/checkpoints/$f"
-      [ -f "$p" ] && log "    ✓ $f ($(du -h "$p" | cut -f1))" || die "    ✗ 缺 $f"
-    done
+    # 试 hf download（能通就下；盒子到不了 hf-mirror 会快速失败，之后提醒你手动放）
+    "$CONDA" run -n gvhmr pip install "${PIP_INDEX[@]}" -U "huggingface_hub>=0.20" 2>/dev/null || true
+    if [ "$MIRROR" = "1" ]; then HFENV=(env HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1); else HFENV=(env HF_HUB_DISABLE_XET=1); fi
+    log "  试 hf download（hf-mirror，禁 xet）… 不通就提醒你手动放"
+    "$CONDA" run -n gvhmr --live-stream "${HFENV[@]}" hf download ryanrudes/gvhmr --local-dir "$G1_ROOT/GVHMR/inputs/checkpoints" 2>&1 \
+      || log "  ⚠ hf download 失败（盒子到不了 hf-mirror）"
+    if weights_ok; then log "  ✓ 权重就位"
+    else
+      cat <<EOF
+
+  ── 缺权重。你直接复制到这些路径，放好重跑 ──
+    $G1_ROOT/GVHMR/inputs/checkpoints/gvhmr/gvhmr_siga24_release.ckpt   (163MB)
+    $G1_ROOT/GVHMR/inputs/checkpoints/hmr2/epoch=10-step=25000.ckpt       (2.7GB，注意文件名是 = 不是 %3D)
+    $G1_ROOT/GVHMR/inputs/checkpoints/vitpose/vitpose-h-multi-coco.pth    (2.5GB)
+    $G1_ROOT/GVHMR/inputs/checkpoints/yolo/yolov8x.pt                      (137MB)
+  ── 放好后重跑：bash $0 ──
+EOF
+      exit 0
+    fi
   fi
 fi
 
