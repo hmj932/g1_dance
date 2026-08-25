@@ -25,6 +25,7 @@
 #   MIRROR    1=用国内镜像(HF_ENDPOINT=hf-mirror + 阿里云 pip / 清华 conda)（默认，适用国内盒）；
 #             0=直连（适用海外盒或平台已内置学术加速）
 #   STAGE     all|env|weights|smoke|status（默认 all）。失败后重跑 all 会自动跳过已完成步骤、从断点续；status 只打印进度不干活
+#   VIDEO     D 步推理的视频（相对 GVHMR 目录，默认 docs/example_video/tennis.mp4）。换舞蹈视频：VIDEO=docs/example_video/你的.mp4
 set -euo pipefail
 
 G1_ROOT="${G1_ROOT:-/root/Beyondminic-Weilai-G1}"
@@ -32,6 +33,8 @@ CONDA="${CONDA:-conda}"
 MIRROR="${MIRROR:-1}"
 STAGE="${STAGE:-all}"
 STAGING="${STAGING:-/home/Downloads}"   # 你上传权重/SMPL 的目录；盒子 hf 不通时从这里 cp 兜底
+VIDEO="${VIDEO:-docs/example_video/tennis.mp4}"   # D 步推理的视频（相对 GVHMR 目录）
+STEM="${STEM:-$(basename "$VIDEO" .mp4)}"          # 视频名 → .pt 目录名 + csv 名
 
 # ---- 镜像开关（仅本脚本进程内生效，不写全局 pip config / ~/.condarc）----
 if [ "$MIRROR" = "1" ]; then
@@ -59,9 +62,9 @@ weights_ok(){ local f; for f in gvhmr/gvhmr_siga24_release.ckpt hmr2/epoch=10-st
 smpl_ok(){ [ -f "$G1_ROOT/GVHMR/inputs/checkpoints/body_models/smplx/SMPLX_NEUTRAL.npz" ] \
         && [ -f "$G1_ROOT/GMR/assets/body_models/smplx/SMPLX_NEUTRAL.npz" ] \
         && [ -f "$G1_ROOT/GMR/assets/body_models/smplx/SMPLX_NEUTRAL.pkl" ]; }
-pt_ok(){ [ -f "$G1_ROOT/GVHMR/outputs/demo/tennis/hmr4d_results.pt" ] \
-       || [ -n "$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path '*tennis*' 2>/dev/null | head -1)" ]; }
-csv_ok(){ [ -f "$G1_ROOT/whole_body_tracking/motions/csv/tennis.csv" ]; }
+pt_ok(){ [ -f "$G1_ROOT/GVHMR/outputs/demo/$STEM/hmr4d_results.pt" ] \
+       || [ -n "$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path "*$STEM*" 2>/dev/null | head -1 || true)" ]; }
+csv_ok(){ [ -f "$G1_ROOT/whole_body_tracking/motions/csv/$STEM.csv" ]; }
 # 用法：rep "标签" <判定命令>
 rep(){ local lbl="$1"; shift; if "$@" >/dev/null 2>&1; then printf "  \033[32m✓\033[0m %s\n" "$lbl"; else printf "  \033[31m✗\033[0m %s\n" "$lbl"; fi; }
 progress_report(){
@@ -72,8 +75,8 @@ progress_report(){
   rep "A  env gmr(retarget/mujoco/mink)" gmr_env_ok
   rep "B  GVHMR 权重×4"          weights_ok
   rep "C  SMPL neutral(npz+pkl)" smpl_ok
-  rep "D  smoke .pt(tennis)"     pt_ok
-  rep "D  smoke csv(tennis)"     csv_ok
+  rep "D  smoke .pt($STEM)"     pt_ok
+  rep "D  smoke csv($STEM)"     csv_ok
 }
 
 # ===== 0. 前置检查 =====
@@ -205,14 +208,14 @@ EOF
   exit 0
 fi
 
-# ===== D. smoke：tennis.mp4 -s → .pt → .csv（跳 render）=====
+# ===== D. smoke：$VIDEO -s → .pt → .csv（跳 render）=====
 if [[ "$STAGE" == all || "$STAGE" == smoke ]]; then
-  log "D. smoke test：video → .pt → .csv"
-  PT="$G1_ROOT/GVHMR/outputs/demo/tennis/hmr4d_results.pt"
-  [ -f "$PT" ] || PT=$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path '*tennis*' 2>/dev/null | head -1 || true)
+  log "D. smoke test：$VIDEO → .pt → .csv"
+  PT="$G1_ROOT/GVHMR/outputs/demo/$STEM/hmr4d_results.pt"
+  [ -f "$PT" ] || PT=$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path "*$STEM*" 2>/dev/null | head -1 || true)
 
   if [[ "$STAGE" == all ]] && csv_ok && [ -n "$PT" ] && [ -f "$PT" ]; then
-    log "  skip（tennis .pt + csv 都在，smoke 已完成；STAGE=smoke 可强制重跑）"
+    log "  skip（$STEM .pt + csv 都在，smoke 已完成；STAGE=smoke 可强制重跑）"
   else
     DEMO="$G1_ROOT/GVHMR/tools/demo/demo.py"
     # patch 掉 render + merge（render 跳过后 incam/global 视频不存在→merge 必挂；且 ffmpeg 可能没装）。幂等。
@@ -223,9 +226,9 @@ if [[ "$STAGE" == all || "$STAGE" == smoke ]]; then
     log "  [1/2] GVHMR 推理（gvhmr env，-s 静止机位）"
     ( cd "$G1_ROOT/GVHMR" && \
       "$CONDA" run -n gvhmr --live-stream python tools/demo/demo.py \
-        --video=docs/example_video/tennis.mp4 -s )
-    [ -f "$PT" ] || PT="$G1_ROOT/GVHMR/outputs/demo/tennis/hmr4d_results.pt"
-    [ -f "$PT" ] || PT=$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path '*tennis*' 2>/dev/null | head -1 || true)
+        --video="$VIDEO" -s )
+    [ -f "$PT" ] || PT="$G1_ROOT/GVHMR/outputs/demo/$STEM/hmr4d_results.pt"
+    [ -f "$PT" ] || PT=$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path "*$STEM*" 2>/dev/null | head -1 || true)
     [ -n "$PT" ] && [ -f "$PT" ] || die "没生成 hmr4d_results.pt"
     log "  ✓ .pt: $PT ($(du -h "$PT" | cut -f1))"
     log "  [2/2] gvhmr_to_csv（gmr env，SMPL-X→G1 IK retarget）"
@@ -240,11 +243,11 @@ if [[ "$STAGE" == all || "$STAGE" == smoke ]]; then
     fi
     "$CONDA" run -n gmr --live-stream python "$G1_ROOT/whole_body_tracking/scripts/gvhmr_to_csv.py" \
       --gvhmr_pred_file "$PT" \
-      --output_file "$G1_ROOT/whole_body_tracking/motions/csv/tennis.csv"
+      --output_file "$G1_ROOT/whole_body_tracking/motions/csv/$STEM.csv"
   fi
 
-  CSV="$G1_ROOT/whole_body_tracking/motions/csv/tennis.csv"
-  [ -f "$CSV" ] || die "没生成 tennis.csv"
+  CSV="$G1_ROOT/whole_body_tracking/motions/csv/$STEM.csv"
+  [ -f "$CSV" ] || die "没生成 $STEM.csv"
   log "  ✓ CSV: $CSV"
   "$CONDA" run -n gvhmr python - "$CSV" <<'PY'
 import sys,numpy as np
@@ -260,11 +263,11 @@ PY
   （本地验收到此为止——csv_to_npz.py 需 isaaclab，不在本盒跑）
 
   下一步（在 flux / Isaac 侧）：
-  1. 把 tennis.csv 传到仓 whole_body_tracking/motions/csv/
-  2. Isaac 路径跑 csv_to_npz.py → motions/tennis_isaac.npz
+  1. 把 $STEM.csv 传到仓 whole_body_tracking/motions/csv/
+  2. Isaac 路径跑 csv_to_npz.py → motions/${STEM}_isaac.npz
   3. git add+commit+push hmj932/g1_dance（并 git push gitlab main）
   4. flux: gm-run g1_dance/whole_body_tracking/scripts/entry_train_and_play.py \\
-        ... --motion_file motions/tennis_isaac.npz
-  批量转你的舞蹈视频时，把本步的 tennis.mp4 换成你的视频即可（-s 仅适合静止机位拍摄）。
+        ... --motion_file motions/${STEM}_isaac.npz
+  批量转舞蹈视频：VIDEO=docs/example_video/<你的>.mp4 bash $0（-s 仅适合静止机位拍摄）。
 EOF
 fi
