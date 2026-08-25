@@ -14,7 +14,7 @@ def main():
     ap.add_argument("--pkl", required=True, help="gvhmr_to_robot.py 出的 pkl")
     ap.add_argument("--out", required=True, help="输出 mp4 路径")
     ap.add_argument("--gmr", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "GMR"))
-    ap.add_argument("--xml", default="assets/unitree_g1/g1_mocap_29dof_with_hands.xml")
+    ap.add_argument("--xml", default="assets/unitree_g1/g1_mocap_29dof.xml")
     ap.add_argument("--height", type=int, default=480)
     ap.add_argument("--width", type=int, default=640)
     ap.add_argument("--distance", type=float, default=3.5)
@@ -49,7 +49,7 @@ def main():
     for i in range(n):
         data.qpos[:3] = root_pos[i]
         data.qpos[3:7] = root_rot[i]   # wxyz scalar-first (mujoco)，与 GMR step 一致
-        data.qpos[7:] = dof_pos[i]
+        data.qpos[7:7+dof_pos.shape[1]] = dof_pos[i]
         mujoco.mj_forward(model, data)
         cam.lookat = data.xpos[base_id]
         renderer.update_scene(data, camera=cam)
