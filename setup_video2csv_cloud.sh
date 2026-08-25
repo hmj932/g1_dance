@@ -256,10 +256,18 @@ print(f"    形状={m.shape}  列数={'✓36' if m.shape[1]==36 else '✗'+str(m
 print(f"    root_xyz 范围 {m[:,0:3].min(0).round(2)}~{m[:,0:3].max(0).round(2)}；关节弧度范围 {m[:,7:].min():.2f}~{m[:,7:].max():.2f}")
 PY
 
+  # bonus: 渲 G1 动作视频（offscreen，mujoco；验证用，失败不影响 csv）
+  G1MP4="$G1_ROOT/whole_body_tracking/motions/csv/${STEM}_g1.mp4"
+  log "  [3/3] 渲 G1 动作视频（offscreen）→ $G1MP4"
+  "$CONDA" run -n gmr --live-stream python "$G1_ROOT/render_g1_motion_offscreen.py" \
+    --csv "$CSV" --out "$G1MP4" 2>&1 | tail -3 || log "  ⚠ 渲染失败（不影响 csv/npz）"
+  [ -f "$G1MP4" ] && log "  ✓ G1 动作视频: $G1MP4" || true
+
   cat <<EOF
 
   ═══ 视频→CSV 桥跑通 ═══
   CSV 在：$CSV
+  G1 动作视频（验证用，下载本地看）：$G1MP4
   （本地验收到此为止——csv_to_npz.py 需 isaaclab，不在本盒跑）
 
   下一步（在 flux / Isaac 侧）：
