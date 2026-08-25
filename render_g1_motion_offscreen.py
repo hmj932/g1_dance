@@ -11,19 +11,30 @@ import mujoco, imageio, numpy as np
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pkl", required=True, help="gvhmr_to_robot.py 出的 pkl")
+    ap.add_argument("--pkl", help="gvhmr_to_robot.py 出的 pkl（二选一）")
+    ap.add_argument("--csv", help="gvhmr_to_csv 出的 csv（36 列；二选一，直接渲不用过 pkl）")
     ap.add_argument("--out", required=True, help="输出 mp4 路径")
+    ap.add_argument("--fps", type=int, default=30, help="csv 模式的帧率（默认 30）")
     ap.add_argument("--gmr", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "GMR"))
     ap.add_argument("--xml", default="assets/unitree_g1/g1_mocap_29dof.xml")
     ap.add_argument("--height", type=int, default=480)
     ap.add_argument("--width", type=int, default=640)
     ap.add_argument("--distance", type=float, default=3.5)
     args = ap.parse_args()
+    if not args.pkl and not args.csv:
+        ap.error("需要 --pkl 或 --csv 之一")
 
-    sys.path.insert(0, args.gmr)
-    from general_motion_retargeting import load_robot_motion
-
-    _motion_data, fps, root_pos, root_rot, dof_pos, *_ = load_robot_motion(args.pkl)
+    if args.csv:
+        # csv: 36 列 = root_xyz + root_quat_xyzw + 29 joints；转 mujoco wxyz
+        m = np.loadtxt(args.csv, delimiter=",")
+        root_pos = m[:, 0:3]
+        root_rot = m[:, 3:7][:, [3, 0, 1, 2]]  # xyzw → wxyz (mujoco scalar-first)
+        dof_pos = m[:, 7:36]
+        fps = args.fps
+    else:
+        sys.path.insert(0, args.gmr)
+        from general_motion_retargeting import load_robot_motion
+        _motion_data, fps, root_pos, root_rot, dof_pos, *_ = load_robot_motion(args.pkl)
     print(f"loaded {len(root_pos)} frames, fps={fps}")
     xml_path = os.path.join(args.gmr, args.xml)
     model = mujoco.MjModel.from_xml_path(xml_path)
