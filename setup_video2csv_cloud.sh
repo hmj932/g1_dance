@@ -225,7 +225,7 @@ if [[ "$STAGE" == all || "$STAGE" == smoke ]]; then
     sed -i 's/^        merge_videos_horizontal(.*/        pass  # SKIP_RENDER merge_videos_horizontal/' "$DEMO"
     grep -q 'SKIP_RENDER' "$DEMO" && log "  已 patch demo.py 跳过 render + merge（恢复：sed -i '/SKIP_RENDER/s/pass  # //' \"$DEMO\"）"
     log "  [1/2] GVHMR 推理（gvhmr env，STATIC_CAM=$STATIC_CAM）"
-    local CAM_FLAG=""
+    CAM_FLAG=""
     [ "$STATIC_CAM" = "1" ] && CAM_FLAG="-s"
     ( cd "$G1_ROOT/GVHMR" && \
       "$CONDA" run -n gvhmr --live-stream python tools/demo/demo.py \
