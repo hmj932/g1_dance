@@ -35,6 +35,7 @@ STAGE="${STAGE:-all}"
 STAGING="${STAGING:-/home/Downloads}"   # 你上传权重/SMPL 的目录；盒子 hf 不通时从这里 cp 兜底
 VIDEO="${VIDEO:-docs/example_video/tennis.mp4}"   # D 步推理的视频（相对 GVHMR 目录）
 STEM="${STEM:-$(basename "$VIDEO" .mp4)}"          # 视频名 → .pt 目录名 + csv 名
+STATIC_CAM="${STATIC_CAM:-1}"   # 1=固定机位（-s，跳过 VO）；0=运镜（用 SimpleVO 估相机运动）
 
 # ---- 镜像开关（仅本脚本进程内生效，不写全局 pip config / ~/.condarc）----
 if [ "$MIRROR" = "1" ]; then
@@ -223,10 +224,12 @@ if [[ "$STAGE" == all || "$STAGE" == smoke ]]; then
     sed -i 's/^    render_global(cfg)$/    pass  # SKIP_RENDER render_global(cfg)/' "$DEMO"
     sed -i 's/^        merge_videos_horizontal(.*/        pass  # SKIP_RENDER merge_videos_horizontal/' "$DEMO"
     grep -q 'SKIP_RENDER' "$DEMO" && log "  已 patch demo.py 跳过 render + merge（恢复：sed -i '/SKIP_RENDER/s/pass  # //' \"$DEMO\"）"
-    log "  [1/2] GVHMR 推理（gvhmr env，-s 静止机位）"
+    log "  [1/2] GVHMR 推理（gvhmr env，STATIC_CAM=$STATIC_CAM）"
+    local CAM_FLAG=""
+    [ "$STATIC_CAM" = "1" ] && CAM_FLAG="-s"
     ( cd "$G1_ROOT/GVHMR" && \
       "$CONDA" run -n gvhmr --live-stream python tools/demo/demo.py \
-        --video="$VIDEO" -s )
+        --video="$VIDEO" $CAM_FLAG )
     [ -f "$PT" ] || PT="$G1_ROOT/GVHMR/outputs/demo/$STEM/hmr4d_results.pt"
     [ -f "$PT" ] || PT=$(find "$G1_ROOT/GVHMR/outputs" -name hmr4d_results.pt -path "*$STEM*" 2>/dev/null | head -1 || true)
     [ -n "$PT" ] && [ -f "$PT" ] || die "没生成 hmr4d_results.pt"
