@@ -73,6 +73,20 @@ def main() -> None:
     print(f"[entry] pip install -e {ext_path}")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-e", ext_path])
 
+    # 2026-11-21 TASK_20261121_083: image V000127 ships ml_dtypes built against
+    # NumPy 2.x C-API while kit python runs NumPy 1.x, so `import onnx` raises
+    # SystemError and kills train.py at my_on_policy_runner -> exporter -> onnx.
+    # Pin both back to NumPy 1.x-era wheels before any whole_body_tracking import.
+    print("[entry] repair env: pin onnx==1.16.2 ml_dtypes==0.4.0 (NumPy 1.x compatible)")
+    subprocess.check_call([
+        sys.executable, "-m", "pip", "install",
+        "--no-deps", "--force-reinstall",
+        "onnx==1.16.2", "ml_dtypes==0.4.0",
+    ])
+    subprocess.check_call([
+        sys.executable, "-c", "import onnx, ml_dtypes; print('[entry] onnx', onnx.__version__, 'ml_dtypes', ml_dtypes.__version__)",
+    ])
+
     train_script = os.path.join(SCRIPT_DIR, "rsl_rl", "train.py")
     play_script = os.path.join(SCRIPT_DIR, "rsl_rl", "play.py")
     cli_args = sys.argv[1:]
